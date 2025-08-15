@@ -1,0 +1,39 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  projects  Project[]
+  createdAt DateTime  @default(now())
+}
+
+model Project {
+  id        Int       @id @default(autoincrement())
+  name      String
+  gitUrl    String    @unique
+  language  String
+  user      User      @relation(fields: [userId], references: [id])
+  userId    Int
+  issues    Issue[]
+  createdAt DateTime  @default(now())
+}
+
+model Issue {
+  id               Int      @id @default(autoincrement())
+  project          Project  @relation(fields: [projectId], references: [id])
+  projectId        Int
+  filePath         String
+  functionName     String?
+  issueType        String   // e.g., "HighComplexity", "DuplicateCode"
+  metadata         Json?    // Store details like complexity score
+  codeBlock        String
+  status           String   @default("Pending") // "Pending", "Generating", "Resolved"
+  createdAt        DateTime @default(now())
+}

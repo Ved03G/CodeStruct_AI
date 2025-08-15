@@ -1,0 +1,19 @@
+{
+  "name": "codestruct.ai",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "format": "prettier --write .",
+    "lint": "eslint .",
+    "dev": "docker compose up --build",
+    "down": "docker compose down -v"
+  },
+  "devDependencies": {
+  "prettier": "^3.3.3",
+  "typescript": "^5.5.4"
+  }
+}
