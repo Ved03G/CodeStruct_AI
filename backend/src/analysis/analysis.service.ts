@@ -15,7 +15,7 @@ export class AnalysisService {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async startAnalysis(gitUrl: string, language: string): Promise<number> {
+  async startAnalysis(gitUrl: string, language: string, userId?: number): Promise<number> {
     // Create project or reuse existing
     const project = await this.prisma.project.upsert({
       where: { gitUrl },
@@ -24,7 +24,9 @@ export class AnalysisService {
         name: this.deriveProjectName(gitUrl),
         gitUrl,
         language,
-        user: { create: { email: `${Date.now()}@placeholder.local` } },
+        user: userId
+          ? { connect: { id: userId } }
+          : { create: { email: `${Date.now()}@placeholder.local` } },
       },
     });
 

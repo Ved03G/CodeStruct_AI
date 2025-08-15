@@ -44,7 +44,10 @@ const Dashboard: React.FC = () => {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Dashboard</h1>
-  <button className="px-3 py-1 bg-green-600 text-white rounded" onClick={linkProject}>Link New Project</button>
+        <div className="space-x-2">
+          <a href="/api/auth/login" className="px-3 py-1 bg-black text-white rounded">Sign in</a>
+          <button className="px-3 py-1 bg-green-600 text-white rounded" onClick={linkProject}>Link New Project</button>
+        </div>
       </div>
       <div className="grid gap-3">
         {projects.map((p) => (

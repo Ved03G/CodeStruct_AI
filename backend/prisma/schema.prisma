@@ -10,6 +10,9 @@ datasource db {
 model User {
   id        Int       @id @default(autoincrement())
   email     String    @unique
+  githubId  String?   @unique
+  githubUsername String?
+  githubAccessToken String?
   projects  Project[]
   createdAt DateTime  @default(now())
 }

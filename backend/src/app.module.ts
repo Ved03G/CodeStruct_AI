@@ -5,6 +5,7 @@ import { AnalysisModule } from './analysis/analysis.module';
 import { RefactoringModule } from './refactoring/refactoring.module';
 import { ValidationModule } from './validation/validation.module';
 import { ProjectsModule } from './projects/projects.module';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { ProjectsModule } from './projects/projects.module';
     RefactoringModule,
     ValidationModule,
     ProjectsModule,
+  AuthModule,
   ],
 })
 export class AppModule {}

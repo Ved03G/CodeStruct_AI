@@ -24,17 +24,21 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY}
       PORT: 3000
       NODE_ENV: development
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET}
+      GITHUB_REDIRECT_URI: ${GITHUB_REDIRECT_URI}
+      FRONTEND_ORIGIN: http://localhost:5173
     ports:
       - '3000:3000'
     volumes:
       - ./backend:/app
       - /app/node_modules
-    command: sh -c "npm install && npx prisma generate && npx prisma db push && npm run start:dev"
+    command: sh -c "npm install && npx prisma generate && npx prisma db push --accept-data-loss && npm run start:dev"
 
   frontend:
     build: ./frontend
     environment:
-      VITE_API_BASE_URL: http://localhost:3000
+      VITE_API_BASE_URL: http://backend:3000
     ports:
       - '5173:5173'
     depends_on:

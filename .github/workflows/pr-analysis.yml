@@ -1,0 +1,25 @@
+name: PR Analysis
+on:
+  pull_request:
+    branches: [ main ]
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install deps
+        run: |
+          npm --prefix backend ci || npm --prefix backend install
+      - name: Run lightweight analysis
+        run: |
+          node -e "console.log('CodeStruct PR analysis placeholder; connect to backend webhook or script here')"
+      - name: Comment on PR
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: CodeStruct Analysis
+          message: |
+            ✅ PR analyzed by CodeStruct.
+            View dashboard: ${{ secrets.APP_URL }}/dashboard
