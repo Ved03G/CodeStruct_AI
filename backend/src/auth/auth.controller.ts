@@ -36,7 +36,8 @@ export class AuthController {
 
     // Simple demo cookie session
     res.cookie('uid', String(user.id), { httpOnly: true, sameSite: 'lax' });
-    return res.redirect('/');
+    // In your callback function
+    return res.redirect(`${process.env.FRONTEND_ORIGIN}`);
   }
 
   @Get('me')

@@ -7,7 +7,7 @@ export class ProjectsController {
 
   @Get()
   async list() {
-    const projects = await this.prisma.project.findMany({
+  const projects = await (this.prisma as any).project.findMany({
       include: { issues: true, user: true },
     });
   return projects.map((p: any) => ({
@@ -25,7 +25,7 @@ export class ProjectsController {
   @Get(':projectId')
   async details(@Param('projectId') projectId: string) {
     const id = Number(projectId);
-    const project = await this.prisma.project.findUnique({
+  const project = await (this.prisma as any).project.findUnique({
       where: { id },
       include: { issues: true },
     });

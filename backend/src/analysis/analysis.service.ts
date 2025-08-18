@@ -13,7 +13,7 @@ export class AnalysisService {
 
   async startAnalysis(gitUrl: string, language: string, userId?: number): Promise<number> {
     // Create project or reuse existing
-    const project = await this.prisma.project.upsert({
+  const project = await (this.prisma as any).project.upsert({
       where: { gitUrl },
       update: {},
       create: {
@@ -116,7 +116,7 @@ export class AnalysisService {
       const signature = code.slice(node.startIndex, node.endIndex);
       const complexity = this.estimateCyclomaticComplexity(node, code);
       if (complexity > this.complexityThreshold) {
-        await this.prisma.issue.create({
+  await (this.prisma as any).issue.create({
           data: {
             projectId,
             filePath,
@@ -167,7 +167,7 @@ export class AnalysisService {
     for (const [_, list] of map.entries()) {
       if (list.length > 1) {
         for (const item of list) {
-          await this.prisma.issue.create({
+          await (this.prisma as any).issue.create({
             data: {
               projectId,
               filePath,

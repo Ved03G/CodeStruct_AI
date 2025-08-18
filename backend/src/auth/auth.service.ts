@@ -20,7 +20,7 @@ export class AuthService {
       headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/vnd.github+json' },
     });
     const { id, login, email } = me.data;
-    const user = await this.prisma.user.upsert({
+  const user = await (this.prisma as any).user.upsert({
       where: { githubId: String(id) },
       update: { githubUsername: login, email: email ?? `${login}@users.noreply.github.com`, githubAccessToken: accessToken },
       create: { githubId: String(id), githubUsername: login, email: email ?? `${login}@users.noreply.github.com`, githubAccessToken: accessToken },
@@ -29,7 +29,7 @@ export class AuthService {
   }
 
   async getUserById(id: number) {
-    return this.prisma.user.findUnique({ where: { id } });
+  return (this.prisma as any).user.findUnique({ where: { id } });
   }
 
   async listGithubRepos(userId: number) {

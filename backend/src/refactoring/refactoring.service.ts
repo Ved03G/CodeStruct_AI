@@ -11,7 +11,7 @@ export class RefactoringService {
   ) {}
 
   async generateFix(issueId: number) {
-    const issue = await this.prisma.issue.findUnique({ where: { id: issueId } });
+  const issue = await (this.prisma as any).issue.findUnique({ where: { id: issueId } });
     if (!issue) return { error: 'Issue not found' };
 
     // Construct prompt based on issue type
@@ -42,30 +42,39 @@ export class RefactoringService {
   }
 
   private async callLlm(prompt: string): Promise<string> {
-    const apiKey = process.env.OPENAI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       // Fallback: echo code for offline dev
       return prompt.split('\n').slice(-50).join('\n');
     }
 
-    // Placeholder OpenAI compatible call; replace with official SDK if desired
-    const url = 'https://api.openai.com/v1/chat/completions';
-    const resp = await axios.post(
-      url,
-      {
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: 'You are a senior TypeScript refactoring assistant.' },
-          { role: 'user', content: prompt },
-        ],
-        temperature: 0.2,
-      },
-      { headers: { Authorization: `Bearer ${apiKey}` } },
-    );
+    const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
-    const content: string = resp.data.choices?.[0]?.message?.content ?? '';
-    // Extract code fences if present
-    const match = content.match(/```[a-zA-Z]*\n([\s\S]*?)```/);
-    return match ? match[1].trim() : content.trim();
+    const body = {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text:
+                'You are a senior TypeScript refactoring assistant. Return ONLY valid TypeScript code. Do not include explanations or markdown fences.\n\n' +
+                prompt,
+            },
+          ],
+        },
+      ],
+      generationConfig: { temperature: 0.2 },
+    };
+
+    const resp = await axios.post(url, body, {
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    const parts = resp.data?.candidates?.[0]?.content?.parts || [];
+    const text = parts.map((p: any) => p.text || '').join('\n').trim();
+    // Remove code fences if any
+    const match = text.match(/```[a-zA-Z]*\n([\s\S]*?)```/);
+    return match ? match[1].trim() : text;
   }
 }
