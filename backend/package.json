@@ -21,6 +21,7 @@
     "@prisma/client": "^5.17.0",
     "axios": "^1.7.2",
   "cookie-parser": "^1.4.6",
+  "jsonwebtoken": "^9.0.2",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.2",
     "prisma": "^5.17.0",
@@ -28,7 +29,8 @@
     "rxjs": "^7.8.1",
     "simple-git": "^3.27.0",
     "tree-sitter": "^0.20.1",
-    "tree-sitter-typescript": "^0.20.3"
+  "tree-sitter-typescript": "^0.20.3",
+  "tree-sitter-python": "^0.20.4"
   },
   "devDependencies": {
     "@nestjs/cli": "^10.4.5",
@@ -43,6 +45,7 @@
     "ts-loader": "^9.5.1",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
-    "typescript": "^5.5.4"
+  "typescript": "^5.5.4",
+  "@types/jsonwebtoken": "^9.0.6"
   }
 }

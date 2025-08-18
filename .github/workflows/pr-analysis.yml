@@ -7,19 +7,36 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - name: Install deps
+      - name: Collect changed files
+        id: files
+        uses: tj-actions/changed-files@v45
+      - name: Call backend CI API
+        id: call
+        env:
+          BACKEND_URL: ${{ secrets.BACKEND_URL }}
         run: |
-          npm --prefix backend ci || npm --prefix backend install
-      - name: Run lightweight analysis
+          echo "Changed files:" 
+          printf '%s\n' "${{ steps.files.outputs.all_changed_files }}"
+          # Build JSON array of changed files
+          printf '%s\n' "${{ steps.files.outputs.all_changed_files }}" | jq -R -s 'split("\n") | map(select(length>0))' > files.json
+          jq -n \
+            --arg repoUrl "${{ github.server_url }}/${{ github.repository }}.git" \
+            --arg language "typescript" \
+            --argjson files "$(cat files.json)" \
+            '{repoUrl: $repoUrl, language: $language, files: $files}' > payload.json
+          curl -sS -X POST "$BACKEND_URL/api/ci/analyze-pr" \
+            -H 'Content-Type: application/json' \
+            --data @payload.json | tee result.json
+      - name: Compose PR comment
+        id: compose
         run: |
-          node -e "console.log('CodeStruct PR analysis placeholder; connect to backend webhook or script here')"
+          summary=$(jq -r '.summary | "Issues: \(.totalIssues) | High complexity: \(.highComplexity) | Duplicates: \(.duplicateCode)"' result.json)
+          echo "summary=$summary" >> $GITHUB_OUTPUT
       - name: Comment on PR
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           header: CodeStruct Analysis
           message: |
             ✅ PR analyzed by CodeStruct.
+            ${{ steps.compose.outputs.summary }}
             View dashboard: ${{ secrets.APP_URL }}/dashboard

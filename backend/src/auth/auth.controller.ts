@@ -1,5 +1,6 @@
 import { Controller, Get, Query, Res, BadRequestException, Req, Post, UnauthorizedException } from '@nestjs/common';
 import { Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
 import { AuthService } from './auth.service';
 
 @Controller('auth')
@@ -36,8 +37,11 @@ export class AuthController {
 
     // Simple demo cookie session
     res.cookie('uid', String(user.id), { httpOnly: true, sameSite: 'lax' });
-    // In your callback function
-    return res.redirect(`${process.env.FRONTEND_ORIGIN}`);
+    // Generate a short-lived JWT for frontend to store; sign with JWT_SECRET or fallback key
+    const secret = process.env.JWT_SECRET || 'dev-secret';
+    const token = jwt.sign({ sub: user.id, gh: user.githubUsername }, secret, { expiresIn: '2h' });
+    const fe = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
+    return res.redirect(`${fe}/login-success?token=${encodeURIComponent(token)}`);
   }
 
   @Get('me')

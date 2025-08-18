@@ -1,9 +1,15 @@
-import { Body, Controller, Post, Req } from '@nestjs/common';
+import { Body, Controller, Post, Req, BadRequestException } from '@nestjs/common';
 import { Request } from 'express';
 import { AnalysisService } from './analysis.service';
+import { IsNotEmpty, IsString } from 'class-validator';
 
 class StartAnalysisDto {
+  @IsString()
+  @IsNotEmpty()
   gitUrl!: string;
+
+  @IsString()
+  @IsNotEmpty()
   language!: string;
 }
 
@@ -13,7 +19,10 @@ export class AnalysisController {
 
   @Post('start')
   async start(@Body() body: StartAnalysisDto, @Req() req: Request) {
-    const { gitUrl, language } = body;
+    const { gitUrl, language } = body || {} as any;
+    if (!gitUrl || !language) {
+      throw new BadRequestException('gitUrl and language are required');
+    }
     const uid = req.cookies?.uid ? Number(req.cookies.uid) : undefined;
     const projectId = await this.analysisService.startAnalysis(gitUrl, language, uid);
     return { projectId };

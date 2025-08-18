@@ -6,6 +6,7 @@ import { RefactoringModule } from './refactoring/refactoring.module';
 import { ValidationModule } from './validation/validation.module';
 import { ProjectsModule } from './projects/projects.module';
 import { AuthModule } from './auth/auth.module';
+import { CiModule } from './ci/ci.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { AuthModule } from './auth/auth.module';
     ValidationModule,
     ProjectsModule,
   AuthModule,
+  CiModule,
   ],
 })
 export class AppModule {}
