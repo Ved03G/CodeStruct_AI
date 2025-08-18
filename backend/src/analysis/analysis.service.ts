@@ -4,10 +4,6 @@ import simpleGit from 'simple-git';
 import { tmpdir } from 'os';
 import { mkdtemp, readdir, readFile } from 'fs/promises';
 import { join, extname } from 'path';
-// node-tree-sitter bindings
-import Parser = require('tree-sitter');
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const Ts = require('tree-sitter-typescript');
 
 @Injectable()
 export class AnalysisService {
@@ -55,14 +51,26 @@ export class AnalysisService {
       const code = await readFile(file, 'utf8');
       const ext = extname(file).toLowerCase();
       if (!this.supports(ext, language)) continue;
-      // Parse AST
-      const parser = new Parser();
-      if (language.toLowerCase().includes('ts')) {
-        parser.setLanguage(Ts.typescript);
-      } else {
-        parser.setLanguage(Ts.tsx);
+      // Parse AST (lazy-load to avoid native build at app startup)
+      let tree: any = null;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const Parser = require('tree-sitter');
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const Ts = require('tree-sitter-typescript');
+        const parser = new Parser();
+        if (language.toLowerCase().includes('ts')) {
+          parser.setLanguage(Ts.typescript);
+        } else {
+          parser.setLanguage(Ts.tsx);
+        }
+        tree = parser.parse(code);
+      } catch (e: any) {
+        // If native deps are missing locally, skip AST-based analysis gracefully
+        // eslint-disable-next-line no-console
+        console.warn('AST analysis skipped (tree-sitter not available):', e?.message || e);
+        continue;
       }
-      const tree = parser.parse(code);
 
       await this.detectHighComplexityFunctions(tree, code, projectId, file);
       await this.detectDuplicateBlocks(tree, code, projectId, file);
@@ -92,7 +100,7 @@ export class AnalysisService {
 
   // Very rough cyclomatic complexity estimation by counting branching nodes
   private async detectHighComplexityFunctions(
-    tree: Parser.Tree,
+    tree: any,
     code: string,
     projectId: number,
     filePath: string
@@ -122,7 +130,7 @@ export class AnalysisService {
     }
   }
 
-  private estimateCyclomaticComplexity(node: Parser.SyntaxNode, code: string) {
+  private estimateCyclomaticComplexity(node: any, code: string) {
     const keywords = ['if', 'for', 'while', 'case', 'catch', '&&', '||', '?'];
     const text = code.slice(node.startIndex, node.endIndex);
     let score = 1;
@@ -133,7 +141,7 @@ export class AnalysisService {
     return score;
   }
 
-  private extractFunctionName(node: Parser.SyntaxNode, code: string) {
+  private extractFunctionName(node: any, code: string) {
     // Simple heuristic for function name
     const text = code.slice(node.startIndex, node.endIndex);
     const m = text.match(/function\s+(\w+)/) || text.match(/(\w+)\s*\(/);
@@ -141,7 +149,7 @@ export class AnalysisService {
   }
 
   private async detectDuplicateBlocks(
-    tree: Parser.Tree,
+    tree: any,
     code: string,
     projectId: number,
     filePath: string
@@ -174,9 +182,9 @@ export class AnalysisService {
     }
   }
 
-  private queryNodes(tree: Parser.Tree, types: string[]) {
-    const nodes: Parser.SyntaxNode[] = [];
-    const walk = (n: Parser.SyntaxNode) => {
+  private queryNodes(tree: any, types: string[]) {
+    const nodes: any[] = [];
+    const walk = (n: any) => {
       if (types.includes(n.type)) nodes.push(n);
       for (let i = 0; i < n.childCount; i++) walk(n.child(i)!);
     };
@@ -184,7 +192,7 @@ export class AnalysisService {
     return nodes;
   }
 
-  private normalizeAst(node: Parser.SyntaxNode, code: string) {
+  private normalizeAst(node: any, code: string) {
     // Replace identifiers with placeholders to detect structural duplicates
     const text = code.slice(node.startIndex, node.endIndex);
     return text
