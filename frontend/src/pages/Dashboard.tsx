@@ -63,11 +63,19 @@ const Dashboard: React.FC = () => {
         <h2 className="text-xl font-semibold">Analyzed projects</h2>
         <div className="grid gap-3">
           {projects.map((p) => (
-            <Link key={p.id} to={`/project/${p.id}`} className="block border rounded p-4 bg-white shadow-sm">
-              <div className="font-semibold">{p.name}</div>
-              <div className="text-sm text-gray-600">Language: {p.language}</div>
-              <div className="text-sm">
-                Issues: {p.issueSummary.total} (HC: {p.issueSummary.highComplexity}, Dup: {p.issueSummary.duplicateCode})
+            <Link key={p.id} to={`/project/${p.id}`} className="block border rounded p-4 bg-white shadow-sm hover:shadow transition">
+              <div className="flex items-center justify-between">
+                <div className="font-semibold truncate mr-2">{p.name}</div>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${p.status === 'Completed' ? 'bg-emerald-100 text-emerald-700' : p.status === 'Analyzing' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-700'}`}>{p.status || 'Unknown'}</span>
+              </div>
+              <div className="text-xs text-gray-600 mt-1">Language: {p.language}</div>
+              <div className="text-sm mt-2 flex flex-wrap gap-2">
+                <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded">Total {p.issueSummary.total}</span>
+                <span className="inline-flex items-center gap-1 text-xs bg-orange-100 text-orange-800 px-2 py-0.5 rounded">HC {p.issueSummary.highComplexity}</span>
+                <span className="inline-flex items-center gap-1 text-xs bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">Dup {p.issueSummary.duplicateCode}</span>
+                {typeof p.issueSummary.magicNumbers === 'number' && (
+                  <span className="inline-flex items-center gap-1 text-xs bg-pink-100 text-pink-800 px-2 py-0.5 rounded">Magic {p.issueSummary.magicNumbers}</span>
+                )}
               </div>
             </Link>
           ))}

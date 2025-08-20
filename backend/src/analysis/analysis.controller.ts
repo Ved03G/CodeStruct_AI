@@ -1,4 +1,4 @@
-import { Body, Controller, Post, Req, BadRequestException } from '@nestjs/common';
+import { Body, Controller, Post, Req, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
 import { Request } from 'express';
 import { AnalysisService } from './analysis.service';
 import { IsNotEmpty, IsString } from 'class-validator';
@@ -18,6 +18,7 @@ export class AnalysisController {
   constructor(private readonly analysisService: AnalysisService) {}
 
   @Post('start')
+  @HttpCode(HttpStatus.ACCEPTED)
   async start(@Body() body: StartAnalysisDto, @Req() req: Request) {
     const { gitUrl, language } = body || {} as any;
     if (!gitUrl || !language) {
@@ -25,6 +26,6 @@ export class AnalysisController {
     }
     const uid = req.cookies?.uid ? Number(req.cookies.uid) : undefined;
     const projectId = await this.analysisService.startAnalysis(gitUrl, language, uid);
-    return { projectId };
+    return { projectId, status: 'Analyzing' };
   }
 }

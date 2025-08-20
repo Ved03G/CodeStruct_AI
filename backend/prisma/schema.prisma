@@ -22,6 +22,7 @@ model Project {
   name      String
   gitUrl    String    @unique
   language  String
+  status    String    @default("Analyzing") // "Analyzing" | "Completed" | "Failed"
   user      User      @relation(fields: [userId], references: [id])
   userId    Int
   issues    Issue[]

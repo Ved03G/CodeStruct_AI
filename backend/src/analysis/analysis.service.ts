@@ -13,13 +13,14 @@ export class AnalysisService {
 
   async startAnalysis(gitUrl: string, language: string, userId?: number): Promise<number> {
     // Create project or reuse existing
-  const project = await (this.prisma as any).project.upsert({
+    const project = await (this.prisma as any).project.upsert({
       where: { gitUrl },
-      update: {},
+      update: { status: 'Analyzing' },
       create: {
         name: this.deriveProjectName(gitUrl),
         gitUrl,
         language,
+    status: 'Analyzing',
         user: userId
           ? { connect: { id: userId } }
           : { create: { email: `${Date.now()}@placeholder.local` } },
@@ -41,7 +42,7 @@ export class AnalysisService {
     }
 
     // Async fire-and-forget analysis (no queue for demo)
-    this.analyzeRepo(effectiveUrl, language, project.id).catch((err) => {
+  this.analyzeRepo(effectiveUrl, language, project.id).catch((err) => {
       // eslint-disable-next-line no-console
       console.error('Analysis failed', err);
     });
@@ -56,19 +57,28 @@ export class AnalysisService {
   }
 
   private async analyzeRepo(gitUrl: string, language: string, projectId: number) {
-    const dir = await mkdtemp(join(tmpdir(), 'codestruct-'));
-    const git = simpleGit();
-    await git.clone(gitUrl, dir);
+    let dir: string | undefined;
+  try {
+      dir = await mkdtemp(join(tmpdir(), 'codestruct-'));
+      const git = simpleGit();
+      await git.clone(gitUrl, dir);
 
-    const files = await this.collectFiles(dir);
+      // Reset existing issues for re-run scenarios
+      await (this.prisma as any).issue.deleteMany({ where: { projectId } });
 
-    for (const file of files) {
+  const files = await this.collectFiles(dir);
+
+  // Global duplicate map across files
+  const duplicateMap = new Map<string, { file: string; text: string }[]>();
+
+      for (const file of files) {
       const code = await readFile(file, 'utf8');
       const ext = extname(file).toLowerCase();
       if (!this.supports(ext, language)) continue;
-      let blocks: { start: number; end: number; text: string }[] = [];
-      // Try AST first
-      try {
+  let blocks: { start: number; end: number; text: string }[] = [];
+  let astSucceeded = false;
+  // Try AST first
+  try {
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         const Parser = require('tree-sitter');
         // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -84,45 +94,90 @@ export class AnalysisService {
         const tree = parser.parse(code);
         const fnTypes = ['function_declaration', 'method_definition', 'arrow_function', 'function', 'function_definition'];
         const nodes = this.queryNodes(tree, fnTypes);
-        blocks = nodes.map((node: any) => ({ start: node.startIndex, end: node.endIndex, text: code.slice(node.startIndex, node.endIndex) }));
+        const complexitiesAst: number[] = [];
+        blocks = nodes.map((node: any) => {
+          const text = code.slice(node.startIndex, node.endIndex);
+          const cpx = this.estimateCyclomaticComplexityAst(node, code);
+          complexitiesAst.push(cpx);
+          return { start: node.startIndex, end: node.endIndex, text };
+        });
+
+  // High complexity issues (AST-based)
+        for (let i = 0; i < blocks.length; i++) {
+          const complexity = complexitiesAst[i] ?? this.estimateCyclomaticComplexityFromText(blocks[i].text);
+          if (complexity > this.complexityThreshold) {
+            await (this.prisma as any).issue.create({
+              data: {
+                projectId,
+                filePath: file,
+                functionName: this.extractFunctionNameFromText(blocks[i].text, language),
+                issueType: 'HighComplexity',
+                metadata: { complexity },
+                codeBlock: blocks[i].text,
+              },
+            });
+          }
+        }
+        astSucceeded = true;
       } catch (e: any) {
         // Fallback extraction if AST not available
         blocks = this.extractBlocksFallback(code, language);
       }
 
-      // High complexity issues
+      // High complexity issues (fallback, when AST path failed)
+      if (!astSucceeded) {
+        for (const b of blocks) {
+          const complexity = this.estimateCyclomaticComplexityFromText(b.text);
+          if (complexity > this.complexityThreshold) {
+            await (this.prisma as any).issue.create({
+              data: {
+                projectId,
+                filePath: file,
+                functionName: this.extractFunctionNameFromText(b.text, language),
+                issueType: 'HighComplexity',
+                metadata: { complexity },
+                codeBlock: b.text,
+              },
+            });
+          }
+        }
+      }
+
+      // Record blocks for global duplicate detection
       for (const b of blocks) {
-        const complexity = this.estimateCyclomaticComplexityFromText(b.text);
-        if (complexity > this.complexityThreshold) {
+        const normalized = this.normalizeAstLike(b.text);
+        const hash = await this.hash(normalized);
+        const arr = duplicateMap.get(hash) || [];
+        arr.push({ file, text: b.text });
+        duplicateMap.set(hash, arr);
+      }
+
+      // Magic numbers detection per block
+      for (const b of blocks) {
+        const magic = this.findMagicNumbers(b.text, language);
+        for (const m of magic) {
           await (this.prisma as any).issue.create({
             data: {
               projectId,
               filePath: file,
               functionName: this.extractFunctionNameFromText(b.text, language),
-              issueType: 'HighComplexity',
-              metadata: { complexity },
+              issueType: 'MagicNumber',
+              metadata: { value: m.value, count: m.count },
               codeBlock: b.text,
             },
           });
         }
       }
+  } // end for each file
 
-      // Duplicate detection per file
-      const map = new Map<string, { start: number; end: number; text: string }[]>();
-      for (const b of blocks) {
-        const normalized = this.normalizeAstLike(b.text);
-        const hash = await this.hash(normalized);
-        const arr = map.get(hash) || [];
-        arr.push(b);
-        map.set(hash, arr);
-      }
-      for (const [_, list] of map.entries()) {
+      // Create duplicate issues across entire repo after scanning all files
+      for (const [_, list] of duplicateMap.entries()) {
         if (list.length > 1) {
           for (const item of list) {
             await (this.prisma as any).issue.create({
               data: {
                 projectId,
-                filePath: file,
+                filePath: item.file,
                 functionName: this.extractFunctionNameFromText(item.text, language),
                 issueType: 'DuplicateCode',
                 metadata: { duplicates: list.length },
@@ -131,6 +186,22 @@ export class AnalysisService {
             });
           }
         }
+      }
+      // Mark project completed
+      await (this.prisma as any).project.update({ where: { id: projectId }, data: { status: 'Completed' } });
+    } catch (e) {
+      // Mark project failed
+      try {
+        await (this.prisma as any).project.update({ where: { id: projectId }, data: { status: 'Failed' } });
+      } catch {}
+      throw e;
+    } finally {
+      // Cleanup temp dir best-effort
+      if (dir) {
+        try {
+          const { rm } = await import('fs/promises');
+          await (rm as any)(dir, { recursive: true, force: true });
+        } catch {}
       }
     }
   }
@@ -280,6 +351,12 @@ export class AnalysisService {
     return score;
   }
 
+  private estimateCyclomaticComplexityAst(node: any, code: string) {
+    // Basic approach: count decision keywords within node range
+    const text = code.slice(node.startIndex, node.endIndex);
+    return this.estimateCyclomaticComplexityFromText(text);
+  }
+
   private extractFunctionName(node: any, code: string) {
     // Simple heuristic for function name
     const text = code.slice(node.startIndex, node.endIndex);
@@ -400,5 +477,30 @@ export class AnalysisService {
       hash = (hash * 33) ^ input.charCodeAt(i);
     }
     return (hash >>> 0).toString(16);
+  }
+
+  // Heuristic magic number detection within a block of code
+  private findMagicNumbers(text: string, language: string): { value: number; count: number }[] {
+    // Ignore common non-magic values
+    const ignore = new Set([0, 1, -1]);
+    // Extract numeric literals
+    const nums = text.match(/(?<![A-Za-z_])[-+]?\b\d+(?:_\d+)*(?:\.\d+)?\b/g) || [];
+    const counts = new Map<number, number>();
+    for (const n of nums) {
+      const v = Number(n.replace(/_/g, ''));
+      if (Number.isNaN(v)) continue;
+      if (ignore.has(v)) continue;
+      counts.set(v, (counts.get(v) || 0) + 1);
+    }
+
+    // Filter numbers that appear in likely loop headers (very rough)
+    const filtered: { value: number; count: number }[] = [];
+    for (const [value, count] of counts.entries()) {
+      // Exclude if used in typical for-range patterns (best-effort)
+      const re = new RegExp(`for\\s*\\([^)]*?${value}[^)]*\)`);
+      if (re.test(text)) continue;
+      filtered.push({ value, count });
+    }
+    return filtered;
   }
 }

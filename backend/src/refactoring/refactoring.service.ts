@@ -15,12 +15,13 @@ export class RefactoringService {
     if (!issue) return { error: 'Issue not found' };
 
     // Construct prompt based on issue type
-    const prompt = this.buildPrompt(issue.issueType, issue.codeBlock, issue.functionName ?? undefined);
+    const lang = this.detectLanguage(issue.filePath);
+    const prompt = this.buildPrompt(issue.issueType, issue.codeBlock, issue.functionName ?? undefined, lang);
 
     const suggestion = await this.callLlm(prompt);
 
     // Validate suggestion
-    const validation = await this.validator.validate(issue.codeBlock, suggestion, 'typescript');
+    const validation = await this.validator.validate(issue.codeBlock, suggestion, /\.py$/i.test(issue.filePath) ? 'python' : 'typescript');
 
     if (!validation.isValid) {
       return { error: 'Generated fix failed validation' };
@@ -29,16 +30,25 @@ export class RefactoringService {
     return { suggestedCode: suggestion };
   }
 
-  private buildPrompt(issueType: string, code: string, functionName?: string) {
+  private buildPrompt(issueType: string, code: string, functionName?: string, language: 'typescript' | 'python' = 'typescript') {
+    const langName = language === 'python' ? 'Python' : 'TypeScript';
     if (issueType === 'HighComplexity') {
-      return `You are an expert TypeScript refactoring assistant. Refactor the following function to reduce cyclomatic complexity. Keep the ORIGINAL function name${
+      return `You are an expert ${langName} refactoring assistant. Refactor the following function to reduce cyclomatic complexity. Keep the ORIGINAL function name${
         functionName ? ` (${functionName})` : ''
-      } and signature exactly the same. Prefer extracting small, single-purpose helper functions. Return ONLY valid TypeScript code for the refactored function.\n\n` + code;
+      } and signature exactly the same. Prefer extracting small, single-purpose helper functions. Return ONLY valid ${langName} code for the refactored function.\n\n` + code;
     }
     if (issueType === 'DuplicateCode') {
-      return `You are an expert TypeScript refactoring assistant. Refactor the following code to remove duplication while keeping behavior identical. Preserve public function signatures. Return ONLY valid TypeScript code.\n\n` + code;
+      return `You are an expert ${langName} refactoring assistant. Refactor the following code to remove duplication while keeping behavior identical. Preserve public function signatures. Return ONLY valid ${langName} code.\n\n` + code;
     }
-    return `Improve and simplify the following TypeScript code without changing its behavior or its function signature(s). Return ONLY valid TypeScript code.\n\n` + code;
+    if (issueType === 'MagicNumber') {
+      return `You are an expert ${langName} engineer. The following code contains one or more magic numbers. Replace each magic number with a well-named constant placed at the top of the file (or module). Infer descriptive names from context (e.g., ADMIN_ROLE_ID, MAX_LOGIN_ATTEMPTS). Do not change behavior or function signatures. Return ONLY the complete, refactored ${langName} code.\n\n` + code;
+    }
+    return `Improve and simplify the following ${langName} code without changing its behavior or its function signature(s). Return ONLY valid ${langName} code.\n\n` + code;
+  }
+
+  private detectLanguage(filePath?: string): 'typescript' | 'python' {
+    if (!filePath) return 'typescript';
+    return /\.py$/i.test(filePath) ? 'python' : 'typescript';
   }
 
   private async callLlm(prompt: string): Promise<string> {

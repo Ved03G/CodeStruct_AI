@@ -28,7 +28,7 @@ const RefactoringView: React.FC<Props> = ({ issue }) => {
   return (
     <div className="border rounded-md p-4 bg-white shadow-sm">
       <div className="flex items-center justify-between mb-2">
-        <h3 className="font-semibold">Issue: {issue.issueType}</h3>
+        <h3 className="font-semibold">Refactoring Suggestion</h3>
         <button
           className="px-3 py-1 bg-blue-600 text-white rounded disabled:opacity-50"
           onClick={handleGenerate}
