@@ -90,6 +90,11 @@ const Project: React.FC = () => {
           ))}
           <div className="text-xs text-slate-500 ml-2">Filter issues</div>
         </div>
+        {data.issues.length === 0 && (
+          <div className="p-6 text-center text-slate-600 border rounded bg-white">
+            No issues detected. You can try re-running analysis, or analyzing a different branch/repo.
+          </div>
+        )}
         {data.issues
           .filter((i: any) => filter === 'All' || i.issueType === filter)
           .map((issue: any) => (

@@ -7,9 +7,52 @@ import { join, extname } from 'path';
 
 @Injectable()
 export class AnalysisService {
-  private complexityThreshold = 10;
+  private complexityThreshold = 15; // raised for better initial signal
 
-  constructor(private readonly prisma: PrismaService) {}
+  // Tree-sitter parser and language cache (initialized once)
+  private parser: any;
+  private languages: Map<string, any>;
+  private tsApi: any | undefined;
+
+  constructor(private readonly prisma: PrismaService) {
+    // Lazy-safe init of parser and languages
+  try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const Parser = require('tree-sitter');
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const Ts = require('tree-sitter-typescript');
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const Py = require('tree-sitter-python');
+
+      this.parser = new Parser();
+      this.languages = new Map<string, any>([
+        ['typescript', Ts.typescript],
+        ['tsx', Ts.tsx],
+        ['python', Py],
+      ]);
+      if (process.env.ANALYSIS_DEBUG) {
+        // eslint-disable-next-line no-console
+        console.log('[analysis] Tree-sitter initialized');
+      }
+    } catch (e) {
+      this.parser = undefined;
+      this.languages = new Map();
+      // eslint-disable-next-line no-console
+      console.warn('[analysis] Tree-sitter not available, falling back to text heuristics');
+    }
+
+    // Try to load TypeScript API for AST-based fallback normalization
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      this.tsApi = require('typescript');
+      if (process.env.ANALYSIS_DEBUG) {
+        // eslint-disable-next-line no-console
+        console.log('[analysis] TypeScript API available for AST fallback');
+      }
+    } catch {
+      this.tsApi = undefined;
+    }
+  }
 
   async startAnalysis(gitUrl: string, language: string, userId?: number): Promise<number> {
     // Create project or reuse existing
@@ -58,51 +101,56 @@ export class AnalysisService {
 
   private async analyzeRepo(gitUrl: string, language: string, projectId: number) {
     let dir: string | undefined;
-  try {
+    try {
       dir = await mkdtemp(join(tmpdir(), 'codestruct-'));
       const git = simpleGit();
       await git.clone(gitUrl, dir);
+      if (process.env.ANALYSIS_DEBUG) {
+        // eslint-disable-next-line no-console
+        console.log(`[analysis] cloned into: ${dir}`);
+      }
 
       // Reset existing issues for re-run scenarios
       await (this.prisma as any).issue.deleteMany({ where: { projectId } });
 
-  const files = await this.collectFiles(dir);
+      const files = await this.collectFiles(dir);
+      if (process.env.ANALYSIS_DEBUG) {
+        // eslint-disable-next-line no-console
+        console.log(`[analysis] total files found: ${files.length}`);
+      }
 
-  // Global duplicate map across files
+  // Global duplicate map across files (structural hashes)
   const duplicateMap = new Map<string, { file: string; text: string }[]>();
 
+      let created = 0;
       for (const file of files) {
-      const code = await readFile(file, 'utf8');
-      const ext = extname(file).toLowerCase();
-      if (!this.supports(ext, language)) continue;
-  let blocks: { start: number; end: number; text: string }[] = [];
-  let astSucceeded = false;
-  // Try AST first
-  try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const Parser = require('tree-sitter');
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const Ts = require('tree-sitter-typescript');
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const Py = require('tree-sitter-python');
-        const parser = new Parser();
-        const lang = language.toLowerCase();
-        if (lang.includes('ts')) parser.setLanguage(Ts.typescript);
-        else if (lang.includes('js')) parser.setLanguage(Ts.tsx);
-        else if (lang.includes('py')) parser.setLanguage(Py);
-        else parser.setLanguage(Ts.typescript);
-        const tree = parser.parse(code);
-        const fnTypes = ['function_declaration', 'method_definition', 'arrow_function', 'function', 'function_definition'];
-        const nodes = this.queryNodes(tree, fnTypes);
-        const complexitiesAst: number[] = [];
-        blocks = nodes.map((node: any) => {
-          const text = code.slice(node.startIndex, node.endIndex);
-          const cpx = this.estimateCyclomaticComplexityAst(node, code);
-          complexitiesAst.push(cpx);
-          return { start: node.startIndex, end: node.endIndex, text };
-        });
+        const code = await readFile(file, 'utf8');
+        const ext = extname(file).toLowerCase();
+        if (!this.supports(ext, language)) continue;
+        if (process.env.ANALYSIS_DEBUG) {
+          // eslint-disable-next-line no-console
+          console.log(`[analysis] analyzing: ${file}`);
+        }
+        let blocks: { start: number; end: number; text: string; node?: any }[] = [];
+        let astSucceeded = false;
+        // Try AST first
+        try {
+          const langKey = ext === '.py' ? 'python' : (ext === '.tsx' ? 'tsx' : 'typescript');
+          const langObj = this.languages.get(langKey);
+          if (!langObj) throw new Error(`Language not initialized for ${langKey}`);
+          this.parser.setLanguage(langObj);
+          const tree = this.parser.parse(code);
+          const fnTypes = ['function_declaration', 'method_definition', 'arrow_function', 'function', 'function_definition'];
+          const nodes = this.queryNodes(tree, fnTypes);
+          const complexitiesAst: number[] = [];
+          blocks = nodes.map((node: any) => {
+            const text = code.slice(node.startIndex, node.endIndex);
+            const cpx = this.estimateCyclomaticComplexityAst(node, code, language);
+            complexitiesAst.push(cpx);
+            return { start: node.startIndex, end: node.endIndex, text, node };
+          });
 
-  // High complexity issues (AST-based)
+          // High complexity issues (AST-based)
         for (let i = 0; i < blocks.length; i++) {
           const complexity = complexitiesAst[i] ?? this.estimateCyclomaticComplexityFromText(blocks[i].text);
           if (complexity > this.complexityThreshold) {
@@ -116,62 +164,93 @@ export class AnalysisService {
                 codeBlock: blocks[i].text,
               },
             });
+            created++;
           }
         }
-        astSucceeded = true;
-      } catch (e: any) {
-        // Fallback extraction if AST not available
-        blocks = this.extractBlocksFallback(code, language);
-      }
+          astSucceeded = blocks.length > 0;
+        } catch (e: any) {
+          // Log AST parsing failure for visibility
+          // eslint-disable-next-line no-console
+          console.error(`[analysis] AST parsing failed for file ${file}:`, e);
+          // Fallback extraction if AST not available
+          blocks = this.extractBlocksFallback(code, language);
+        }
 
-      // High complexity issues (fallback, when AST path failed)
-      if (!astSucceeded) {
+        // High complexity issues (fallback, when AST path failed)
+        if (!astSucceeded) {
+          for (const b of blocks) {
+            const complexity = this.estimateCyclomaticComplexityFromText(b.text);
+            if (complexity > this.complexityThreshold) {
+              await (this.prisma as any).issue.create({
+                data: {
+                  projectId,
+                  filePath: file,
+                  functionName: this.extractFunctionNameFromText(b.text, language),
+                  issueType: 'HighComplexity',
+                  metadata: { complexity },
+                  codeBlock: b.text,
+                },
+              });
+              created++;
+            }
+          }
+          // As a last resort, run magic-number detection over entire file if no blocks
+          if (!blocks.length) {
+            const magicWhole = this.findMagicNumbers(code, language);
+            for (const m of magicWhole) {
+              await (this.prisma as any).issue.create({
+                data: {
+                  projectId,
+                  filePath: file,
+                  functionName: null,
+                  issueType: 'MagicNumber',
+                  metadata: { value: m.value, count: m.count },
+                  codeBlock: code.slice(0, Math.min(code.length, 2000)),
+                },
+              });
+              created++;
+            }
+          }
+        }
+
+        // Record blocks for global duplicate detection
         for (const b of blocks) {
-          const complexity = this.estimateCyclomaticComplexityFromText(b.text);
-          if (complexity > this.complexityThreshold) {
+          let hash: string | undefined;
+          if (b.node && this.parser) {
+            const normalized = this.normalizeAndHashNode(b.node);
+            hash = this.simpleHash(normalized);
+          } else if (this.tsApi && (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx')) {
+            const normTs = this.normalizeAndHashTsSnippet(b.text, ext);
+            hash = this.simpleHash(normTs || this.normalizeAstLike(b.text));
+          } else {
+            // Fallback structural approximation when AST unavailable
+            hash = this.simpleHash(this.normalizeAstLike(b.text));
+          }
+          const arr = duplicateMap.get(hash) || [];
+          arr.push({ file, text: b.text });
+          duplicateMap.set(hash, arr);
+        }
+
+        // Magic numbers detection per block
+        for (const b of blocks) {
+          const magic = this.findMagicNumbers(b.text, language);
+          for (const m of magic) {
             await (this.prisma as any).issue.create({
               data: {
                 projectId,
                 filePath: file,
                 functionName: this.extractFunctionNameFromText(b.text, language),
-                issueType: 'HighComplexity',
-                metadata: { complexity },
+                issueType: 'MagicNumber',
+                metadata: { value: m.value, count: m.count },
                 codeBlock: b.text,
               },
             });
           }
         }
-      }
-
-      // Record blocks for global duplicate detection
-      for (const b of blocks) {
-        const normalized = this.normalizeAstLike(b.text);
-        const hash = await this.hash(normalized);
-        const arr = duplicateMap.get(hash) || [];
-        arr.push({ file, text: b.text });
-        duplicateMap.set(hash, arr);
-      }
-
-      // Magic numbers detection per block
-      for (const b of blocks) {
-        const magic = this.findMagicNumbers(b.text, language);
-        for (const m of magic) {
-          await (this.prisma as any).issue.create({
-            data: {
-              projectId,
-              filePath: file,
-              functionName: this.extractFunctionNameFromText(b.text, language),
-              issueType: 'MagicNumber',
-              metadata: { value: m.value, count: m.count },
-              codeBlock: b.text,
-            },
-          });
-        }
-      }
-  } // end for each file
+      } // end for each file
 
       // Create duplicate issues across entire repo after scanning all files
-      for (const [_, list] of duplicateMap.entries()) {
+  for (const [_, list] of duplicateMap.entries()) {
         if (list.length > 1) {
           for (const item of list) {
             await (this.prisma as any).issue.create({
@@ -184,9 +263,14 @@ export class AnalysisService {
                 codeBlock: item.text,
               },
             });
+    created++;
           }
         }
       }
+  if (process.env.ANALYSIS_DEBUG) {
+    // eslint-disable-next-line no-console
+    console.log(`[analysis] total issues created: ${created}`);
+  }
       // Mark project completed
       await (this.prisma as any).project.update({ where: { id: projectId }, data: { status: 'Completed' } });
     } catch (e) {
@@ -221,25 +305,19 @@ export class AnalysisService {
       const code = await readFile(file, 'utf8');
       const ext = extname(file).toLowerCase();
       if (!this.supports(ext, language)) continue;
-      let blocks: { start: number; end: number; text: string }[] = [];
+      let blocks: { start: number; end: number; text: string; node?: any }[] = [];
       try {
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const Parser = require('tree-sitter');
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const Ts = require('tree-sitter-typescript');
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
-        const Py = require('tree-sitter-python');
-        const parser = new Parser();
-        const lang = language.toLowerCase();
-        if (lang.includes('ts')) parser.setLanguage(Ts.typescript);
-        else if (lang.includes('js')) parser.setLanguage(Ts.tsx);
-        else if (lang.includes('py')) parser.setLanguage(Py);
-        else parser.setLanguage(Ts.typescript);
-        const tree = parser.parse(code);
+        const langKey = ext === '.py' ? 'python' : (ext === '.tsx' ? 'tsx' : 'typescript');
+        const langObj = this.languages.get(langKey);
+        if (!langObj) throw new Error(`Language not initialized for ${langKey}`);
+        this.parser.setLanguage(langObj);
+        const tree = this.parser.parse(code);
         const fnTypes = ['function_declaration', 'method_definition', 'arrow_function', 'function', 'function_definition'];
         const nodes = this.queryNodes(tree, fnTypes);
-        blocks = nodes.map((n: any) => ({ start: n.startIndex, end: n.endIndex, text: code.slice(n.startIndex, n.endIndex) }));
-      } catch {
+        blocks = nodes.map((n: any) => ({ start: n.startIndex, end: n.endIndex, text: code.slice(n.startIndex, n.endIndex), node: n }));
+      } catch (e: any) {
+        // eslint-disable-next-line no-console
+        console.error(`[analysis:quick] AST parsing failed for file ${file}:`, e);
         blocks = this.extractBlocksFallback(code, language);
       }
 
@@ -252,8 +330,9 @@ export class AnalysisService {
 
       const map = new Map<string, { start: number; end: number; text: string }[]>();
       for (const b of blocks) {
-        const normalized = this.normalizeAstLike(b.text);
-        const hash = await this.hash(normalized);
+        if (!b.node) continue;
+        const normalized = this.normalizeAndHashNode(b.node);
+        const hash = this.simpleHash(normalized);
         const arr = map.get(hash) || [];
         arr.push(b);
         map.set(hash, arr);
@@ -351,10 +430,28 @@ export class AnalysisService {
     return score;
   }
 
-  private estimateCyclomaticComplexityAst(node: any, code: string) {
-    // Basic approach: count decision keywords within node range
-    const text = code.slice(node.startIndex, node.endIndex);
-    return this.estimateCyclomaticComplexityFromText(text);
+  private estimateCyclomaticComplexityAst(node: any, code: string, language: string) {
+    // Traverse AST and count decision nodes per spec
+    const decisionTypesTs = new Set([
+      'if_statement', 'for_statement', 'while_statement', 'switch_statement', 'case_clause', 'catch_clause', 'conditional_expression',
+    ]);
+    const decisionTypesPy = new Set([
+      'if_statement', 'for_statement', 'while_statement', 'except_clause', 'conditional_expression',
+    ]);
+    const isPy = language.toLowerCase().includes('py');
+    const decisionTypes = isPy ? decisionTypesPy : decisionTypesTs;
+    let score = 1;
+    const walk = (n: any) => {
+      if (!n) return;
+      if (decisionTypes.has(n.type)) score++;
+      // Count logical operators inside this node text
+      const text = code.slice(n.startIndex, n.endIndex);
+      const logicalCount = (text.match(/&&|\|\|/g) || []).length;
+      score += logicalCount;
+      for (let i = 0; i < n.childCount; i++) walk(n.child(i));
+    };
+    walk(node);
+    return score;
   }
 
   private extractFunctionName(node: any, code: string) {
@@ -377,14 +474,78 @@ export class AnalysisService {
     return nodes;
   }
 
+  // Build a structural string from an AST node, replacing identifiers with a placeholder
+  private normalizeAndHashNode(node: any): string {
+    if (!node) return '';
+    // Ignore certain trivial token types
+    const ignoreTypes = new Set(['comment', ';', ',']);
+    if (ignoreTypes.has(node.type)) return '';
+    // Replace identifiers generically
+    const identifierTypes = new Set(['identifier', 'property_identifier']);
+    if (identifierTypes.has(node.type)) {
+      return '(IDENTIFIER)';
+    }
+    // Recursively include only named children to skip punctuation/whitespace
+    let result = `(${node.type}`;
+    if (Array.isArray(node.namedChildren)) {
+      for (const child of node.namedChildren) {
+        result += this.normalizeAndHashNode(child);
+      }
+    } else {
+      // Fallback iterate children if namedChildren missing
+      for (let i = 0; i < (node.childCount || 0); i++) {
+        const c = node.child(i);
+        if (c) result += this.normalizeAndHashNode(c);
+      }
+    }
+    result += ')';
+    return result;
+  }
+
+  private simpleHash(input: string): string {
+    // djb2 variant
+    let h = 5381;
+    for (let i = 0; i < input.length; i++) {
+      h = (h * 33) ^ input.charCodeAt(i);
+    }
+    return (h >>> 0).toString(16);
+  }
+
+  // Fallback structural normalization using TypeScript compiler API (if available)
+  private normalizeAndHashTsSnippet(code: string, ext: string): string | null {
+    if (!this.tsApi) return null;
+    try {
+      const ts = this.tsApi;
+      const scriptKind = ext === '.tsx' ? ts.ScriptKind.TSX : ext === '.jsx' ? ts.ScriptKind.JSX : ts.ScriptKind.TS;
+      const sf = ts.createSourceFile('tmp' + ext, code, ts.ScriptTarget.ES2020, true, scriptKind);
+      const idKinds = new Set([
+        ts.SyntaxKind.Identifier,
+        ts.SyntaxKind.PrivateIdentifier,
+      ]);
+      const ignoreKinds = new Set([
+        ts.SyntaxKind.EndOfFileToken,
+      ]);
+      let out = '';
+      const visit = (n: any) => {
+        if (ignoreKinds.has(n.kind)) return;
+        if (idKinds.has(n.kind)) {
+          out += '(IDENTIFIER)';
+          return;
+        }
+        out += '(' + ts.SyntaxKind[n.kind] + ')';
+        ts.forEachChild(n, visit);
+      };
+      visit(sf);
+      return out;
+    } catch {
+      return null;
+    }
+  }
+
+  // Deprecated: kept temporarily for reference; no longer used
   private normalizeAstLike(text: string) {
-    // Replace identifiers with placeholders to detect structural duplicates
     return text
-      .replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/g, (m) => {
-        // keep keywords minimalistically
-        const kw = ['if', 'for', 'while', 'return', 'const', 'let', 'var', 'function', 'def', 'class', 'elif', 'else'];
-        return kw.includes(m) ? m : 'ID';
-      })
+      .replace(/\b[A-Za-z_][A-Za-z0-9_]*\b/g, 'ID')
       .replace(/\d+/g, 'NUM')
       .replace(/\s+/g, ' ')
       .trim();
@@ -428,6 +589,19 @@ export class AnalysisService {
       const end = findMatchingBrace(braceIdx);
       if (end > braceIdx) blocks.push({ start: m.index, end: end + 1, text: code.slice(m.index, end + 1) });
     }
+    // class methods and constructors
+    const reserved = new Set(['if','for','while','switch','catch','try','else','do','function']);
+    const methodRegex = /(?:^|\n)\s*(?:public|private|protected|static|async\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*\{/g;
+    for (let m; (m = methodRegex.exec(code)); ) {
+      const name = m[1];
+      if (reserved.has(name)) continue;
+      const braceIdx = m.index + m[0].lastIndexOf('{');
+      const end = findMatchingBrace(braceIdx);
+      if (end > braceIdx) {
+        const start = m.index;
+        blocks.push({ start, end: end + 1, text: code.slice(start, end + 1) });
+      }
+    }
     // arrow functions with block body: => { ... }
     const arrowRegex = /=>\s*\{/g;
     for (let m; (m = arrowRegex.exec(code)); ) {
@@ -470,13 +644,9 @@ export class AnalysisService {
     return blocks;
   }
 
+  // Deprecated: old hashing helper; replaced by simpleHash
   private async hash(input: string) {
-    // simple djb2 hash as string key
-    let hash = 5381;
-    for (let i = 0; i < input.length; i++) {
-      hash = (hash * 33) ^ input.charCodeAt(i);
-    }
-    return (hash >>> 0).toString(16);
+    return this.simpleHash(input);
   }
 
   // Heuristic magic number detection within a block of code
