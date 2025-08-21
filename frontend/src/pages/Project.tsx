@@ -10,6 +10,10 @@ const Project: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [polling, setPolling] = useState<NodeJS.Timeout | null>(null);
   const [filter, setFilter] = useState<'All' | 'HighComplexity' | 'DuplicateCode' | 'MagicNumber'>('All');
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [ast, setAst] = useState<{ filePath: string; language: string; format: string; ast: string } | null>(null);
+  const [astLoading, setAstLoading] = useState(false);
+  const [astError, setAstError] = useState<string | null>(null);
 
   useEffect(() => {
     let timer: any;
@@ -36,14 +40,47 @@ const Project: React.FC = () => {
   if (error) return <div className="p-6 text-red-600">{error}</div>;
   if (!data) return <div className="p-6">Not found</div>;
 
+  const filesUnion: string[] = data ? Array.from(new Set([...(data.files || []), ...((data.astFiles as string[]) || [])])) : [];
+
+  const hasAst = (f: string) => (data?.astFiles || []).includes(f);
+
+  const loadAst = async (filePath: string) => {
+    if (!projectId) return;
+    setSelectedFile(filePath);
+    setAst(null);
+    setAstError(null);
+    setAstLoading(true);
+    try {
+      const encoded = encodeURIComponent(filePath);
+      const { data: resp } = await api.get(`/projects/${projectId}/ast/${encoded}`);
+      if (resp && !resp.error) setAst(resp);
+      else setAstError('AST not found');
+    } catch (e: any) {
+      setAstError(e?.message ?? 'Failed to load AST');
+    } finally {
+      setAstLoading(false);
+    }
+  };
+
   return (
     <div className="p-6 grid grid-cols-12 gap-4">
       <div className="col-span-3">
         <div className="border rounded p-3 bg-white shadow-sm">
           <div className="font-semibold mb-2">Files</div>
           <ul className="text-sm space-y-1">
-            {data.files.map((f: string) => (
-              <li key={f} className="truncate">{f}</li>
+            {filesUnion.map((f: string) => (
+              <li key={f} className="truncate flex items-center justify-between gap-2">
+                <button
+                  className={`text-left flex-1 truncate ${selectedFile === f ? 'font-semibold text-slate-900' : 'text-slate-700'}`}
+                  title={f}
+                  onClick={() => hasAst(f) ? loadAst(f) : setSelectedFile(f)}
+                >
+                  {f}
+                </button>
+                {hasAst(f) && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">AST</span>
+                )}
+              </li>
             ))}
           </ul>
         </div>
@@ -109,6 +146,31 @@ const Project: React.FC = () => {
               <RefactoringView issue={issue} />
             </div>
           ))}
+
+        {/* AST Viewer */}
+        <div className="border rounded bg-white">
+          <div className="px-3 py-2 border-b flex items-center justify-between">
+            <div className="text-sm font-semibold">AST Viewer</div>
+            <div className="text-xs text-slate-600 truncate max-w-[70%]" title={selectedFile || ''}>
+              {selectedFile ? selectedFile : 'Select a file with AST badge from the left'}
+            </div>
+          </div>
+          <div className="p-3">
+            {astLoading && <div className="text-sm">Loading AST…</div>}
+            {astError && <div className="text-sm text-red-600">{astError}</div>}
+            {!astLoading && !astError && ast && (
+              <div className="space-y-2">
+                <div className="text-xs text-slate-600">Language: {ast.language} • Format: {ast.format}</div>
+                <pre className="text-xs overflow-auto max-h-[480px] p-3 bg-slate-50 border rounded whitespace-pre-wrap break-words">
+{ast.ast}
+                </pre>
+              </div>
+            )}
+            {!astLoading && !astError && !ast && (
+              <div className="text-sm text-slate-600">No AST loaded.</div>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

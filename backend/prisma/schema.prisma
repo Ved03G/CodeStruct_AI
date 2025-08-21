@@ -26,6 +26,8 @@ model Project {
   user      User      @relation(fields: [userId], references: [id])
   userId    Int
   issues    Issue[]
+  fileAsts  FileAst[]
+  files     ProjectFile[]
   createdAt DateTime  @default(now())
 }
 
@@ -40,4 +42,31 @@ model Issue {
   codeBlock        String
   status           String   @default("Pending") // "Pending", "Generating", "Resolved"
   createdAt        DateTime @default(now())
+}
+
+model FileAst {
+  id         Int      @id @default(autoincrement())
+  project    Project  @relation(fields: [projectId], references: [id])
+  projectId  Int
+  filePath   String
+  language   String
+  astFormat  String   // e.g., "s-expression" | "ts-compiler"
+  ast        String   // large text representation
+  createdAt  DateTime @default(now())
+
+  @@index([projectId])
+  @@unique([projectId, filePath])
+}
+
+model ProjectFile {
+  id         Int      @id @default(autoincrement())
+  project    Project  @relation(fields: [projectId], references: [id])
+  projectId  Int
+  filePath   String
+  ext        String
+  supported  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  @@index([projectId])
+  @@unique([projectId, filePath])
 }

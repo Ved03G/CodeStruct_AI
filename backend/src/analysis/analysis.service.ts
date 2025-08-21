@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
+import { ParserService } from '../parser/parser.service';
 import { PrismaService } from '../prisma/prisma.service';
 import simpleGit from 'simple-git';
 import { tmpdir } from 'os';
 import { mkdtemp, readdir, readFile } from 'fs/promises';
-import { join, extname } from 'path';
+import { join, extname, relative } from 'path';
 
 @Injectable()
 export class AnalysisService {
@@ -14,7 +15,10 @@ export class AnalysisService {
   private languages: Map<string, any>;
   private tsApi: any | undefined;
 
-  constructor(private readonly prisma: PrismaService) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly parserService: ParserService,
+  ) {
     // Lazy-safe init of parser and languages
   try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -112,24 +116,49 @@ export class AnalysisService {
 
       // Reset existing issues for re-run scenarios
       await (this.prisma as any).issue.deleteMany({ where: { projectId } });
+  await (this.prisma as any).fileAst?.deleteMany?.({ where: { projectId } }).catch(() => {});
 
       const files = await this.collectFiles(dir);
+      // Parse all files and persist ASTs using ParserService
+      const asts = await this.parserService.parseRepo(dir, language);
+      for (const [relPath, astObj] of Object.entries(asts)) {
+        await (this.prisma as any).fileAst.create({
+          data: {
+            projectId,
+            filePath: relPath,
+            language: astObj.language,
+            astFormat: astObj.format,
+            ast: String(astObj.ast).slice(0, 500000),
+          },
+        }).catch(() => {});
+      }
       if (process.env.ANALYSIS_DEBUG) {
         // eslint-disable-next-line no-console
         console.log(`[analysis] total files found: ${files.length}`);
       }
+      // Store file inventory for the project (use repo-relative paths)
+      try {
+        await (this.prisma as any).projectFile?.deleteMany?.({ where: { projectId } });
+        const batch = files.slice(0, 5000).map((p) => {
+          const rel = relative(dir!, p).replace(/\\/g, '/');
+          const e = extname(p).toLowerCase();
+          return { projectId, filePath: rel, ext: e, supported: this.supports(e, language) };
+        });
+        if (batch.length) await (this.prisma as any).projectFile?.createMany?.({ data: batch, skipDuplicates: true });
+      } catch {}
 
   // Global duplicate map across files (structural hashes)
   const duplicateMap = new Map<string, { file: string; text: string }[]>();
 
       let created = 0;
       for (const file of files) {
+        const displayPath = relative(dir!, file).replace(/\\/g, '/');
         const code = await readFile(file, 'utf8');
         const ext = extname(file).toLowerCase();
         if (!this.supports(ext, language)) continue;
         if (process.env.ANALYSIS_DEBUG) {
           // eslint-disable-next-line no-console
-          console.log(`[analysis] analyzing: ${file}`);
+          console.log(`[analysis] analyzing: ${displayPath}`);
         }
         let blocks: { start: number; end: number; text: string; node?: any }[] = [];
         let astSucceeded = false;
@@ -140,6 +169,19 @@ export class AnalysisService {
           if (!langObj) throw new Error(`Language not initialized for ${langKey}`);
           this.parser.setLanguage(langObj);
           const tree = this.parser.parse(code);
+          // Save S-expression for UI
+          try {
+            const sexpr = tree.rootNode.sExpression;
+      await (this.prisma as any).fileAst.create({
+              data: {
+                projectId,
+        filePath: displayPath,
+                language: langKey,
+                astFormat: 's-expression',
+                ast: String(sexpr).slice(0, 500000),
+              },
+            });
+          } catch {}
           const fnTypes = ['function_declaration', 'method_definition', 'arrow_function', 'function', 'function_definition'];
           const nodes = this.queryNodes(tree, fnTypes);
           const complexitiesAst: number[] = [];
@@ -174,6 +216,21 @@ export class AnalysisService {
           console.error(`[analysis] AST parsing failed for file ${file}:`, e);
           // Fallback extraction if AST not available
           blocks = this.extractBlocksFallback(code, language);
+          // Try to store a structural AST via TS API for TS/TSX/JS
+          if (this.tsApi && (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx')) {
+            const norm = this.normalizeAndHashTsSnippet(code, ext);
+            if (norm) {
+        await (this.prisma as any).fileAst.create({
+                data: {
+                  projectId,
+          filePath: displayPath,
+                  language: 'typescript-like',
+                  astFormat: 'ts-compiler',
+                  ast: String(norm).slice(0, 500000),
+                },
+              }).catch(() => {});
+            }
+          }
         }
 
         // High complexity issues (fallback, when AST path failed)
@@ -181,10 +238,10 @@ export class AnalysisService {
           for (const b of blocks) {
             const complexity = this.estimateCyclomaticComplexityFromText(b.text);
             if (complexity > this.complexityThreshold) {
-              await (this.prisma as any).issue.create({
+        await (this.prisma as any).issue.create({
                 data: {
                   projectId,
-                  filePath: file,
+          filePath: displayPath,
                   functionName: this.extractFunctionNameFromText(b.text, language),
                   issueType: 'HighComplexity',
                   metadata: { complexity },
@@ -201,7 +258,7 @@ export class AnalysisService {
               await (this.prisma as any).issue.create({
                 data: {
                   projectId,
-                  filePath: file,
+          filePath: displayPath,
                   functionName: null,
                   issueType: 'MagicNumber',
                   metadata: { value: m.value, count: m.count },
@@ -227,7 +284,7 @@ export class AnalysisService {
             hash = this.simpleHash(this.normalizeAstLike(b.text));
           }
           const arr = duplicateMap.get(hash) || [];
-          arr.push({ file, text: b.text });
+      arr.push({ file: displayPath, text: b.text });
           duplicateMap.set(hash, arr);
         }
 
@@ -235,10 +292,10 @@ export class AnalysisService {
         for (const b of blocks) {
           const magic = this.findMagicNumbers(b.text, language);
           for (const m of magic) {
-            await (this.prisma as any).issue.create({
+      await (this.prisma as any).issue.create({
               data: {
                 projectId,
-                filePath: file,
+        filePath: displayPath,
                 functionName: this.extractFunctionNameFromText(b.text, language),
                 issueType: 'MagicNumber',
                 metadata: { value: m.value, count: m.count },
