@@ -8,7 +8,7 @@ import { join, extname, relative } from 'path';
 
 @Injectable()
 export class AnalysisService {
-  private complexityThreshold = 15; // raised for better initial signal
+  private complexityThreshold = 6; // lower threshold for more findings
 
   // Tree-sitter parser and language cache (initialized once)
   private parser: any;
@@ -160,72 +160,51 @@ export class AnalysisService {
           // eslint-disable-next-line no-console
           console.log(`[analysis] analyzing: ${displayPath}`);
         }
-        let blocks: { start: number; end: number; text: string; node?: any }[] = [];
+        let blocks: { start: number; end: number; text: string }[] = [];
         let astSucceeded = false;
-        // Try AST first
-        try {
-          const langKey = ext === '.py' ? 'python' : (ext === '.tsx' ? 'tsx' : 'typescript');
-          const langObj = this.languages.get(langKey);
-          if (!langObj) throw new Error(`Language not initialized for ${langKey}`);
-          this.parser.setLanguage(langObj);
-          const tree = this.parser.parse(code);
-          // Save S-expression for UI
+        // Prefer JSON AST produced by ParserService
+        const astObj = (asts as any)[displayPath];
+        if (astObj?.ast && (astObj.format === 'tree-sitter-json' || astObj.format === 'ts-compiler-json')) {
           try {
-            const sexpr = tree.rootNode.sExpression;
-      await (this.prisma as any).fileAst.create({
-              data: {
-                projectId,
-        filePath: displayPath,
-                language: langKey,
-                astFormat: 's-expression',
-                ast: String(sexpr).slice(0, 500000),
-              },
-            });
-          } catch {}
-          const fnTypes = ['function_declaration', 'method_definition', 'arrow_function', 'function', 'function_definition'];
-          const nodes = this.queryNodes(tree, fnTypes);
-          const complexitiesAst: number[] = [];
-          blocks = nodes.map((node: any) => {
-            const text = code.slice(node.startIndex, node.endIndex);
-            const cpx = this.estimateCyclomaticComplexityAst(node, code, language);
-            complexitiesAst.push(cpx);
-            return { start: node.startIndex, end: node.endIndex, text, node };
-          });
-
-          // High complexity issues (AST-based)
-        for (let i = 0; i < blocks.length; i++) {
-          const complexity = complexitiesAst[i] ?? this.estimateCyclomaticComplexityFromText(blocks[i].text);
-          if (complexity > this.complexityThreshold) {
-            await (this.prisma as any).issue.create({
-              data: {
-                projectId,
-                filePath: file,
-                functionName: this.extractFunctionNameFromText(blocks[i].text, language),
-                issueType: 'HighComplexity',
-                metadata: { complexity },
-                codeBlock: blocks[i].text,
-              },
-            });
-            created++;
+            const jsonAst = JSON.parse(astObj.ast);
+            const funcNodes = this.findFunctionsJson(jsonAst, astObj.format);
+            for (const fn of funcNodes) {
+              const { start, end } = this.getRangeFromJsonNode(fn, astObj.format);
+              const text = code.slice(start, end);
+              blocks.push({ start, end, text });
+              const complexity = this.calculateComplexityJson(fn, astObj.format);
+              if (complexity > this.complexityThreshold) {
+                await (this.prisma as any).issue.create({
+                  data: {
+                    projectId,
+                    filePath: displayPath,
+                    functionName: this.extractFunctionNameFromText(text, language),
+                    issueType: 'HighComplexity',
+                    metadata: { complexity },
+                    codeBlock: text,
+                  },
+                });
+                created++;
+              }
+            }
+            astSucceeded = funcNodes.length > 0;
+          } catch (e) {
+            // continue to fallbacks
           }
         }
-          astSucceeded = blocks.length > 0;
-        } catch (e: any) {
-          // Log AST parsing failure for visibility
-          // eslint-disable-next-line no-console
-          console.error(`[analysis] AST parsing failed for file ${file}:`, e);
-          // Fallback extraction if AST not available
+        // If no JSON AST succeeded, fallback to text-based extraction
+        if (!astSucceeded) {
           blocks = this.extractBlocksFallback(code, language);
-          // Try to store a structural AST via TS API for TS/TSX/JS
+          // Optional: try to persist a JSON AST via TS API for visibility
           if (this.tsApi && (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx')) {
             const norm = this.normalizeAndHashTsSnippet(code, ext);
             if (norm) {
-        await (this.prisma as any).fileAst.create({
+              await (this.prisma as any).fileAst.create({
                 data: {
                   projectId,
-          filePath: displayPath,
+                  filePath: displayPath,
                   language: 'typescript-like',
-                  astFormat: 'ts-compiler',
+                  astFormat: 'ts-compiler-json',
                   ast: String(norm).slice(0, 500000),
                 },
               }).catch(() => {});
@@ -273,18 +252,14 @@ export class AnalysisService {
         // Record blocks for global duplicate detection
         for (const b of blocks) {
           let hash: string | undefined;
-          if (b.node && this.parser) {
-            const normalized = this.normalizeAndHashNode(b.node);
-            hash = this.simpleHash(normalized);
-          } else if (this.tsApi && (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx')) {
+          if (this.tsApi && (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx')) {
             const normTs = this.normalizeAndHashTsSnippet(b.text, ext);
             hash = this.simpleHash(normTs || this.normalizeAstLike(b.text));
           } else {
-            // Fallback structural approximation when AST unavailable
             hash = this.simpleHash(this.normalizeAstLike(b.text));
           }
           const arr = duplicateMap.get(hash) || [];
-      arr.push({ file: displayPath, text: b.text });
+          arr.push({ file: displayPath, text: b.text });
           duplicateMap.set(hash, arr);
         }
 
@@ -292,10 +267,10 @@ export class AnalysisService {
         for (const b of blocks) {
           const magic = this.findMagicNumbers(b.text, language);
           for (const m of magic) {
-      await (this.prisma as any).issue.create({
+            await (this.prisma as any).issue.create({
               data: {
                 projectId,
-        filePath: displayPath,
+                filePath: displayPath,
                 functionName: this.extractFunctionNameFromText(b.text, language),
                 issueType: 'MagicNumber',
                 metadata: { value: m.value, count: m.count },
@@ -491,10 +466,13 @@ export class AnalysisService {
     // Traverse AST and count decision nodes per spec
     const decisionTypesTs = new Set([
       'if_statement', 'for_statement', 'while_statement', 'switch_statement', 'case_clause', 'catch_clause', 'conditional_expression',
+      'binary_expression', 'logical_expression', 'do_statement', 'else_clause', 'try_statement', 'throw_statement', 'break_statement', 'continue_statement', 'return_statement',
     ]);
     const decisionTypesPy = new Set([
       'if_statement', 'for_statement', 'while_statement', 'except_clause', 'conditional_expression',
+      'elif_clause', 'else_clause', 'try_statement', 'break_statement', 'continue_statement', 'return_statement',
     ]);
+    const logicalOps = ['&&', '||'];
     const isPy = language.toLowerCase().includes('py');
     const decisionTypes = isPy ? decisionTypesPy : decisionTypesTs;
     let score = 1;
@@ -503,12 +481,40 @@ export class AnalysisService {
       if (decisionTypes.has(n.type)) score++;
       // Count logical operators inside this node text
       const text = code.slice(n.startIndex, n.endIndex);
-      const logicalCount = (text.match(/&&|\|\|/g) || []).length;
-      score += logicalCount;
+      for (const op of logicalOps) {
+        const matches = text.match(new RegExp(`\${op}`, 'g'));
+        if (matches) score += matches.length;
+      }
       for (let i = 0; i < n.childCount; i++) walk(n.child(i));
     };
     walk(node);
     return score;
+  }
+
+  // AST-based normalization for duplicate detection (less strict)
+  private normalizeNode(node: any): string {
+    if (!node) return '';
+    // Ignore only comments and punctuation
+    const ignoreTypes = new Set(['comment', ';', ',']);
+    if (ignoreTypes.has(node.type)) return '';
+    // Replace identifiers generically
+    const identifierTypes = new Set(['identifier', 'property_identifier']);
+    if (identifierTypes.has(node.type)) {
+      return '(ID)';
+    }
+    let result = `(${node.type}`;
+    if (Array.isArray(node.namedChildren)) {
+      for (const child of node.namedChildren) {
+        result += this.normalizeNode(child);
+      }
+    } else {
+      for (let i = 0; i < (node.childCount || 0); i++) {
+        const c = node.child(i);
+        if (c) result += this.normalizeNode(c);
+      }
+    }
+    result += ')';
+    return result;
   }
 
   private extractFunctionName(node: any, code: string) {
@@ -575,25 +581,19 @@ export class AnalysisService {
       const ts = this.tsApi;
       const scriptKind = ext === '.tsx' ? ts.ScriptKind.TSX : ext === '.jsx' ? ts.ScriptKind.JSX : ts.ScriptKind.TS;
       const sf = ts.createSourceFile('tmp' + ext, code, ts.ScriptTarget.ES2020, true, scriptKind);
-      const idKinds = new Set([
-        ts.SyntaxKind.Identifier,
-        ts.SyntaxKind.PrivateIdentifier,
-      ]);
-      const ignoreKinds = new Set([
-        ts.SyntaxKind.EndOfFileToken,
-      ]);
-      let out = '';
-      const visit = (n: any) => {
-        if (ignoreKinds.has(n.kind)) return;
-        if (idKinds.has(n.kind)) {
-          out += '(IDENTIFIER)';
-          return;
-        }
-        out += '(' + ts.SyntaxKind[n.kind] + ')';
-        ts.forEachChild(n, visit);
+      const serialize = (n: any): any => {
+        const nodeObj: any = {
+          type: ts.SyntaxKind[n.kind],
+          pos: n.pos,
+          end: n.end,
+          children: [] as any[],
+        };
+        ts.forEachChild(n, (c: any) => {
+          nodeObj.children.push(serialize(c));
+        });
+        return nodeObj;
       };
-      visit(sf);
-      return out;
+      return JSON.stringify(serialize(sf), null, 2);
     } catch {
       return null;
     }
@@ -701,31 +701,92 @@ export class AnalysisService {
     return blocks;
   }
 
+  // JSON AST helpers
+  private findFunctionsJson(root: any, format: string): any[] {
+    const out: any[] = [];
+    const isFn = (t: string) => {
+      const tsKinds = new Set([
+        'FunctionDeclaration', 'MethodDeclaration', 'ArrowFunction', 'FunctionExpression',
+      ]);
+      const tsxExtra = new Set(['GetAccessor', 'SetAccessor']);
+      if (format.startsWith('ts-compiler')) return tsKinds.has(t) || tsxExtra.has(t);
+    return t === 'function_declaration' || t === 'method_definition' || t === 'arrow_function' || t === 'function' || t === 'function_definition';
+    };
+    const walk = (n: any) => {
+      if (!n) return;
+      if (n.type && isFn(n.type)) out.push(n);
+      if (Array.isArray(n.children)) {
+        for (const c of n.children) walk(c);
+      }
+    };
+    walk(root);
+    return out;
+  }
+
+  private calculateComplexityJson(node: any, format: string): number {
+    let score = 1;
+    const tsDecisions = new Set([
+      'IfStatement', 'ForStatement', 'WhileStatement', 'DoStatement', 'CaseClause', 'DefaultClause', 'CatchClause', 'ConditionalExpression', 'BinaryExpression',
+    ]);
+    const tsLogicalKinds = new Set(['BinaryExpression']);
+    const tsOps = new Set(['&&', '||']);
+    const walk = (n: any) => {
+      if (!n) return;
+      if (format.startsWith('ts-compiler-json')) {
+        if (tsDecisions.has(n.type)) score++;
+        if (tsLogicalKinds.has(n.type) && typeof n.operatorToken === 'string' && tsOps.has(n.operatorToken)) score++;
+      } else {
+        const tsLikeDec = new Set([
+          'if_statement', 'for_statement', 'while_statement', 'do_statement', 'case_clause', 'default_clause', 'catch_clause', 'conditional_expression', 'binary_expression', 'logical_expression',
+        ]);
+        if (tsLikeDec.has(n.type)) score++;
+      }
+      if (Array.isArray(n.children)) for (const c of n.children) walk(c);
+    };
+    walk(node);
+    return score;
+  }
+
+  private getRangeFromJsonNode(node: any, format: string): { start: number; end: number } {
+    if (format.startsWith('ts-compiler-json')) {
+      return { start: typeof node.pos === 'number' ? node.pos : 0, end: typeof node.end === 'number' ? node.end : 0 };
+    }
+    return { start: typeof node.startIndex === 'number' ? node.startIndex : 0, end: typeof node.endIndex === 'number' ? node.endIndex : 0 };
+  }
+
   // Deprecated: old hashing helper; replaced by simpleHash
   private async hash(input: string) {
     return this.simpleHash(input);
   }
 
-  // Heuristic magic number detection within a block of code
-  private findMagicNumbers(text: string, language: string): { value: number; count: number }[] {
-    // Ignore common non-magic values
-    const ignore = new Set([0, 1, -1]);
-    // Extract numeric literals
-    const nums = text.match(/(?<![A-Za-z_])[-+]?\b\d+(?:_\d+)*(?:\.\d+)?\b/g) || [];
+  // Magic number detection using AST queries if available (more permissive)
+  private findMagicNumbers(text: string, language: string, astNode?: any): { value: number; count: number }[] {
+    const ignore = new Set([-1]); // only ignore -1, flag 0/1 for visibility
     const counts = new Map<number, number>();
-    for (const n of nums) {
-      const v = Number(n.replace(/_/g, ''));
-      if (Number.isNaN(v)) continue;
-      if (ignore.has(v)) continue;
-      counts.set(v, (counts.get(v) || 0) + 1);
+    if (astNode) {
+      const walk = (n: any) => {
+        if (!n) return;
+        if (n.type === 'number') {
+          const v = Number(text.slice(n.startIndex, n.endIndex));
+          if (!Number.isNaN(v) && !ignore.has(v)) {
+            counts.set(v, (counts.get(v) || 0) + 1);
+          }
+        }
+        for (let i = 0; i < n.childCount; i++) walk(n.child(i));
+      };
+      walk(astNode);
+    } else {
+      const nums = text.match(/(?<![A-Za-z_])[-+]?\b\d+(?:_\d+)*(?:\.\d+)?\b/g) || [];
+      for (const n of nums) {
+        const v = Number(n.replace(/_/g, ''));
+        if (Number.isNaN(v)) continue;
+        if (ignore.has(v)) continue;
+        counts.set(v, (counts.get(v) || 0) + 1);
+      }
     }
-
-    // Filter numbers that appear in likely loop headers (very rough)
+    // Do not filter loop headers; flag all
     const filtered: { value: number; count: number }[] = [];
     for (const [value, count] of counts.entries()) {
-      // Exclude if used in typical for-range patterns (best-effort)
-      const re = new RegExp(`for\\s*\\([^)]*?${value}[^)]*\)`);
-      if (re.test(text)) continue;
       filtered.push({ value, count });
     }
     return filtered;

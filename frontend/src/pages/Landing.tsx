@@ -53,9 +53,14 @@ const Landing: React.FC = () => {
           <h1 className="text-4xl font-extrabold tracking-tight">Tame your codebase with automated insights</h1>
           <p className="mt-4 text-slate-600">Analyze complexity, spot duplication, and generate safe refactors powered by AI.</p>
           {!me.authenticated ? (
-            <button onClick={startLogin} className="mt-8 px-4 py-2 bg-black text-white rounded">Sign in with GitHub</button>
+            <>
+              <button onClick={startLogin} className="mt-8 px-4 py-2 bg-black text-white rounded">Sign in with GitHub</button>
+              <button onClick={startLogin} className="mt-4 px-4 py-2 bg-blue-600 text-white rounded">Sign up with GitHub</button>
+            </>
           ) : (
-            <div className="mt-8 text-slate-700">Signed in as <span className="font-semibold">{me.user?.username}</span></div>
+            <>
+              <div className="mt-8 text-slate-700">Signed in as <span className="font-semibold">{me.user?.username}</span></div>
+            </>
           )}
           {error && <div className="mt-4 text-red-600">{error}</div>}
         </section>

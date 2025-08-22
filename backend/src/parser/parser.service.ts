@@ -1,12 +1,35 @@
 import { Injectable } from '@nestjs/common';
 import { extname, join, relative } from 'path';
 import { readdir, readFile } from 'fs/promises';
-
+// ...existing code...
 @Injectable()
 export class ParserService {
   private parser: any;
   private languages: Map<string, any>;
   private tsApi: any | undefined;
+
+  // Recursively serialize Tree-sitter AST as nested JSON
+  private serializeTreeSitterAst(node: any): any {
+    if (!node) return null;
+    const obj: any = {
+      type: node.type,
+      startIndex: node.startIndex,
+      endIndex: node.endIndex,
+      children: [],
+    };
+    if (node.namedChildCount && node.namedChildCount > 0) {
+      for (let i = 0; i < node.namedChildCount; i++) {
+        const child = node.namedChild(i);
+        if (child) obj.children.push(this.serializeTreeSitterAst(child));
+      }
+    } else if (node.childCount && node.childCount > 0) {
+      for (let i = 0; i < node.childCount; i++) {
+        const child = node.child(i);
+        if (child) obj.children.push(this.serializeTreeSitterAst(child));
+      }
+    }
+    return obj;
+  }
 
   constructor() {
     try {
@@ -52,8 +75,8 @@ export class ParserService {
           if (langObj) {
             this.parser.setLanguage(langObj);
             const tree = this.parser.parse(code);
-            ast = tree.rootNode.sExpression;
-            format = 's-expression';
+            ast = JSON.stringify(this.serializeTreeSitterAst(tree.rootNode), null, 2);
+            format = 'tree-sitter-json';
             lang = langKey;
           }
         }
@@ -64,14 +87,20 @@ export class ParserService {
           const ts = this.tsApi;
           const scriptKind = ext === '.tsx' ? ts.ScriptKind.TSX : ext === '.jsx' ? ts.ScriptKind.JSX : ts.ScriptKind.TS;
           const sf = ts.createSourceFile('tmp' + ext, code, ts.ScriptTarget.ES2020, true, scriptKind);
-          let out = '';
-          const visit = (n: any) => {
-            out += '(' + ts.SyntaxKind[n.kind] + ')';
-            ts.forEachChild(n, visit);
+          const serialize = (n: any): any => {
+            const nodeObj: any = {
+              type: ts.SyntaxKind[n.kind],
+              pos: n.pos,
+              end: n.end,
+              children: [] as any[],
+            };
+            ts.forEachChild(n, (c: any) => {
+              nodeObj.children.push(serialize(c));
+            });
+            return nodeObj;
           };
-          visit(sf);
-          ast = out;
-          format = 'ts-compiler';
+          ast = JSON.stringify(serialize(sf), null, 2);
+          format = 'ts-compiler-json';
           lang = 'typescript-like';
         } catch {}
       }
