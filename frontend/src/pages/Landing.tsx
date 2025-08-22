@@ -55,6 +55,7 @@ const Landing: React.FC = () => {
               Analyze complexity, spot duplication, and generate safe refactors powered by AI.
             </p>
 
+
             {!me.authenticated ? (
               <button
                 onClick={startLogin}
