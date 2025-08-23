@@ -9,7 +9,10 @@ const Landing: React.FC = () => {
   const navigate = useNavigate();
 
   const startLogin = () => {
-    window.location.href = '/api/auth/login';
+    // Get the API base URL and construct the login endpoint
+    const apiBaseURL = import.meta.env.VITE_API_BASE_URL || '/api';
+    const loginUrl = `${apiBaseURL}/auth/login`;
+    window.location.href = loginUrl;
   };
 
   useEffect(() => {

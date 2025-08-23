@@ -33,9 +33,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async () => {
     try {
+      // Get the API base URL and construct the login endpoint
+      const apiBaseURL = import.meta.env.VITE_API_BASE_URL || '/api';
+      const loginUrl = `${apiBaseURL}/auth/login`;
+
       // Simply redirect to the backend login endpoint
       // The backend will handle OAuth and set secure cookies
-      window.location.assign('/api/auth/login');
+      window.location.assign(loginUrl);
     } catch (e) {
       console.error('Login failed:', e);
     }
