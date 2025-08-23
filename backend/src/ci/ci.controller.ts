@@ -1,5 +1,6 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
 import { AnalysisService } from '../analysis/analysis.service';
+import { AuthGuard } from '../auth/auth.guard';
 
 class AnalyzePrDto {
   repoUrl!: string;
@@ -9,8 +10,9 @@ class AnalyzePrDto {
 }
 
 @Controller('ci')
+@UseGuards(AuthGuard)
 export class CiController {
-  constructor(private readonly analysis: AnalysisService) {}
+  constructor(private readonly analysis: AnalysisService) { }
 
   @Post('analyze-pr')
   async analyzePr(@Body() body: AnalyzePrDto) {

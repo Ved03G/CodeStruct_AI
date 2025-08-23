@@ -6,7 +6,7 @@ type User = { id: number; username?: string; email?: string } | null;
 type AuthCtx = {
   user: User;
   isAuthenticated: boolean;
-  login: (token: string) => Promise<void>;
+  login: () => Promise<void>;
   logout: () => Promise<void>;
 };
 
@@ -27,30 +27,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         const { data } = await api.get('/auth/me');
         if (data?.authenticated) setUser(data.user);
-      } catch {}
+      } catch { }
     })();
   }, []);
 
-  const login = async (token: string) => {
+  const login = async () => {
     try {
-      // Store token; for demo keep in localStorage
-      localStorage.setItem('auth_token', token);
-      // Optionally include token in future requests (e.g., as header) if backend expects it
-      // For now, session cookie governs auth; token is for client state
-      const { data } = await api.get('/auth/me');
-      if (data?.authenticated) setUser(data.user);
-      window.location.assign('/dashboard');
+      // Simply redirect to the backend login endpoint
+      // The backend will handle OAuth and set secure cookies
+      window.location.assign('/api/auth/login');
     } catch (e) {
-      // fallback to dashboard anyway for now
-      window.location.assign('/dashboard');
+      console.error('Login failed:', e);
     }
   };
 
   const logout = async () => {
     try {
       await api.post('/auth/logout');
-    } catch {}
-    localStorage.removeItem('auth_token');
+    } catch { }
     setUser(null);
     window.location.assign('/');
   };

@@ -1,7 +1,8 @@
-import { Body, Controller, Post, Req, BadRequestException, HttpCode, HttpStatus } from '@nestjs/common';
+import { Body, Controller, Post, Req, BadRequestException, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AnalysisService } from './analysis.service';
 import { IsNotEmpty, IsString } from 'class-validator';
+import { AuthGuard } from '../auth/auth.guard';
 
 class StartAnalysisDto {
   @IsString()
@@ -14,8 +15,9 @@ class StartAnalysisDto {
 }
 
 @Controller('analysis')
+@UseGuards(AuthGuard)
 export class AnalysisController {
-  constructor(private readonly analysisService: AnalysisService) {}
+  constructor(private readonly analysisService: AnalysisService) { }
 
   @Post('start')
   @HttpCode(HttpStatus.ACCEPTED)
@@ -24,8 +26,8 @@ export class AnalysisController {
     if (!gitUrl || !language) {
       throw new BadRequestException('gitUrl and language are required');
     }
-    const uid = req.cookies?.uid ? Number(req.cookies.uid) : undefined;
-    const projectId = await this.analysisService.startAnalysis(gitUrl, language, uid);
+    const user = (req as any).user;
+    const projectId = await this.analysisService.startAnalysis(gitUrl, language, user.id);
     return { projectId, status: 'Analyzing' };
   }
 }

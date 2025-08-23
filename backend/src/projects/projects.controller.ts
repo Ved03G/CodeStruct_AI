@@ -1,26 +1,28 @@
-import { Body, Controller, Get, Param, Post, HttpCode, HttpStatus } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AnalysisService } from '../analysis/analysis.service';
+import { AuthGuard } from '../auth/auth.guard';
 
 @Controller('projects')
+@UseGuards(AuthGuard)
 export class ProjectsController {
-  constructor(private readonly prisma: PrismaService, private readonly analysis: AnalysisService) {}
+  constructor(private readonly prisma: PrismaService, private readonly analysis: AnalysisService) { }
 
   @Get()
   async list() {
-  const projects = await (this.prisma as any).project.findMany({
+    const projects = await (this.prisma as any).project.findMany({
       include: { issues: true, user: true },
     });
-  return projects.map((p: any) => ({
+    return projects.map((p: any) => ({
       id: p.id,
       name: p.name,
       language: p.language,
-  status: p.status,
+      status: p.status,
       issueSummary: {
         total: p.issues.length,
-  highComplexity: p.issues.filter((i: any) => i.issueType === 'HighComplexity').length,
-  duplicateCode: p.issues.filter((i: any) => i.issueType === 'DuplicateCode').length,
-  magicNumbers: p.issues.filter((i: any) => i.issueType === 'MagicNumber').length,
+        highComplexity: p.issues.filter((i: any) => i.issueType === 'HighComplexity').length,
+        duplicateCode: p.issues.filter((i: any) => i.issueType === 'DuplicateCode').length,
+        magicNumbers: p.issues.filter((i: any) => i.issueType === 'MagicNumber').length,
       },
     }));
   }
@@ -45,8 +47,8 @@ export class ProjectsController {
       name: project.name,
       language: project.language,
       status: project.status,
-  files,
-  fileInventory: inv,
+      files,
+      fileInventory: inv,
       astFiles: Array.from(astAvailable),
       issues: project.issues,
     };
