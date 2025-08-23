@@ -1,11 +1,15 @@
-import { Controller, Get, Query, Res, BadRequestException, Req, Post, UnauthorizedException } from '@nestjs/common';
+import { Controller, Get, Query, Res, BadRequestException, Req, Post, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { Request, Response } from 'express';
-import jwt from 'jsonwebtoken';
 import { AuthService } from './auth.service';
+import { JwtService } from './jwt.service';
+import { AuthGuard } from './auth.guard';
 
 @Controller('auth')
 export class AuthController {
-  constructor(private auth: AuthService) {}
+  constructor(
+    private auth: AuthService,
+    private jwtService: JwtService
+  ) { }
 
   @Get('login')
   login(@Res() res: Response) {
@@ -32,41 +36,91 @@ export class AuthController {
     const clientSecret = process.env.GITHUB_CLIENT_SECRET!;
     const redirectUri = process.env.GITHUB_REDIRECT_URI!;
 
-  const tokenResp = await this.auth.exchangeCodeForToken(clientId, clientSecret, code, redirectUri);
+    const tokenResp = await this.auth.exchangeCodeForToken(clientId, clientSecret, code, redirectUri);
     const user = await this.auth.upsertUserFromGithub(tokenResp.access_token);
 
-    // Simple demo cookie session
-    res.cookie('uid', String(user.id), { httpOnly: true, sameSite: 'lax' });
-    // Generate a short-lived JWT for frontend to store; sign with JWT_SECRET or fallback key
-    const secret = process.env.JWT_SECRET || 'dev-secret';
-    const token = jwt.sign({ sub: user.id, gh: user.githubUsername }, secret, { expiresIn: '2h' });
+    // Generate JWT token using JwtService
+    const jwtToken = this.jwtService.generateToken(
+      user.id,
+      user.githubUsername,
+      user.email
+    );
+
+    // Store JWT in secure HTTP-only cookie
+    const isProduction = process.env.NODE_ENV === 'production';
+    res.cookie('jwt_token', jwtToken, {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: isProduction, // Only secure in production
+      maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+    });
+
     const fe = process.env.FRONTEND_ORIGIN || 'http://localhost:5173';
-    return res.redirect(`${fe}/login-success?token=${encodeURIComponent(token)}`);
+    return res.redirect(`${fe}/login-success`);
   }
 
   @Get('me')
   async me(@Req() req: Request) {
-    const uid = req.cookies?.uid ? Number(req.cookies.uid) : NaN;
-    if (!uid) return { authenticated: false };
-    const user = await this.auth.getUserById(uid);
-    if (!user) return { authenticated: false };
-    return {
-      authenticated: true,
-      user: { id: user.id, username: user.githubUsername, email: user.email },
-    };
+    try {
+      const token = req.cookies?.jwt_token;
+      if (!token) return { authenticated: false };
+
+      const decoded = this.jwtService.verifyToken(token);
+
+      // Verify user still exists in database
+      const user = await this.auth.getUserById(decoded.sub);
+      if (!user) return { authenticated: false };
+
+      return {
+        authenticated: true,
+        user: {
+          id: user.id,
+          username: user.githubUsername,
+          email: user.email
+        },
+      };
+    } catch (error) {
+      // Token invalid or expired
+      return { authenticated: false };
+    }
   }
 
   @Post('logout')
   async logout(@Res() res: Response) {
-    res.clearCookie('uid');
+    res.clearCookie('jwt_token');
     return res.status(200).json({ ok: true });
   }
 
   @Get('repos')
+  @UseGuards(AuthGuard)
   async listRepos(@Req() req: Request) {
-    const uid = req.cookies?.uid ? Number(req.cookies.uid) : NaN;
-    if (!uid) throw new UnauthorizedException('Not authenticated');
-    const repos = await this.auth.listGithubRepos(uid);
+    const user = (req as any).user;
+    const repos = await this.auth.listGithubRepos(user.id);
     return repos;
+  }
+
+  @Get('token-info')
+  @UseGuards(AuthGuard)
+  async tokenInfo(@Req() req: Request) {
+    const token = req.cookies?.jwt_token;
+    const decoded = this.jwtService.decodeToken(token);
+    const user = (req as any).user;
+
+    return {
+      token: {
+        sub: decoded?.sub,
+        username: decoded?.username,
+        email: decoded?.email,
+        iat: decoded?.iat ? new Date(decoded.iat * 1000) : null,
+        exp: decoded?.exp ? new Date(decoded.exp * 1000) : null,
+        iss: decoded?.iss,
+        aud: decoded?.aud
+      },
+      user: {
+        id: user.id,
+        username: user.githubUsername,
+        email: user.email
+      }
+    };
   }
 }

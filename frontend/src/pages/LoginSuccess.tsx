@@ -1,20 +1,17 @@
 import React, { useEffect } from 'react';
-import { useLocation } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
 
 const LoginSuccess: React.FC = () => {
-  const { search } = useLocation();
-  const { login } = useAuth();
-
   useEffect(() => {
-    const params = new URLSearchParams(search);
-    const token = params.get('token');
-    if (token) {
-      login(token);
-    }
-  }, [search]);
+    // Authentication is already handled by backend via cookies
+    // Just redirect to dashboard after a brief delay
+    const timer = setTimeout(() => {
+      window.location.assign('/dashboard');
+    }, 1000);
 
-  return <div className="p-6">Logging you in…</div>;
+    return () => clearTimeout(timer);
+  }, []);
+
+  return <div className="p-6">Successfully logged in! Redirecting to dashboard...</div>;
 };
 
 export default LoginSuccess;

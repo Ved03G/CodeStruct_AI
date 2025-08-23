@@ -1,9 +1,11 @@
-import { Controller, Param, Post } from '@nestjs/common';
+import { Controller, Param, Post, UseGuards } from '@nestjs/common';
 import { RefactoringService } from './refactoring.service';
+import { AuthGuard } from '../auth/auth.guard';
 
 @Controller('issues')
+@UseGuards(AuthGuard)
 export class RefactoringController {
-  constructor(private readonly refactoringService: RefactoringService) {}
+  constructor(private readonly refactoringService: RefactoringService) { }
 
   @Post(':id/generate-fix')
   async generateFix(@Param('id') id: string) {
