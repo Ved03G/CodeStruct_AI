@@ -34,7 +34,13 @@ export class ParserService {
   constructor() {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const Parser = require('tree-sitter');
+      let Parser: any;
+      try {
+        Parser = require('tree-sitter');
+      } catch (e1) {
+        // some environments ship under 'node-tree-sitter'
+        Parser = require('node-tree-sitter');
+      }
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const Ts = require('tree-sitter-typescript');
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -57,6 +63,51 @@ export class ParserService {
     }
   }
 
+  // Public helpers for AnalysisService to reuse the single parser instance
+  isTreeSitterAvailable(): boolean {
+    return !!this.parser && this.languages.size > 0;
+  }
+
+  getLanguageKeyByExt(ext: string): 'typescript' | 'tsx' | 'python' {
+    const e = ext.toLowerCase();
+    if (e === '.py') return 'python';
+    if (e === '.tsx') return 'tsx';
+    return 'typescript';
+  }
+
+  parseWithTreeSitter(code: string, extOrLangKey: string): { tree: any; langKey: string } | null {
+    if (!this.isTreeSitterAvailable()) return null;
+    const langKey = extOrLangKey.startsWith('.')
+      ? this.getLanguageKeyByExt(extOrLangKey)
+      : (extOrLangKey as any);
+    const langObj = this.languages.get(langKey);
+    if (!langObj) return null;
+    try {
+      this.parser.setLanguage(langObj);
+      const tree = this.parser.parse(code);
+      return { tree, langKey };
+    } catch {
+      return null;
+    }
+  }
+
+  // Run a Tree-sitter Query against an existing tree root node
+  runQueryOnTree(rootNode: any, langKey: string, queryString: string): Array<{ node: any; name: string }> | null {
+    if (!this.isTreeSitterAvailable()) return null;
+    const langObj = this.languages.get(langKey);
+    if (!langObj || !this.parser) return null;
+    try {
+      const ParserCtor: any = (this.parser as any).constructor;
+      if (!ParserCtor?.Query) return null;
+      const Query = ParserCtor.Query;
+      const q = new Query(langObj, queryString);
+      const captures = q.captures(rootNode) as Array<{ node: any; name: string }>;
+      return captures;
+    } catch {
+      return null;
+    }
+  }
+
   async parseRepo(root: string, language: string): Promise<Record<string, { ast: string; format: string; language: string }>> {
     const files = await this.collectFiles(root);
     const asts: Record<string, { ast: string; format: string; language: string }> = {};
@@ -69,16 +120,11 @@ export class ParserService {
       let lang = '';
       // Try Tree-sitter first
       try {
-        if (this.parser) {
-          const langKey = ext === '.py' ? 'python' : (ext === '.tsx' ? 'tsx' : 'typescript');
-          const langObj = this.languages.get(langKey);
-          if (langObj) {
-            this.parser.setLanguage(langObj);
-            const tree = this.parser.parse(code);
-            ast = JSON.stringify(this.serializeTreeSitterAst(tree.rootNode), null, 2);
-            format = 'tree-sitter-json';
-            lang = langKey;
-          }
+        const parsed = this.parseWithTreeSitter(code, ext);
+        if (parsed) {
+          ast = JSON.stringify(this.serializeTreeSitterAst((parsed as any).tree.rootNode), null, 2);
+          format = 'tree-sitter-json';
+          lang = parsed.langKey;
         }
       } catch {}
       // Fallback to TS compiler for JS/TS/TSX

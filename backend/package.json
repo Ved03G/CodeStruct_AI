@@ -6,12 +6,13 @@
   "scripts": {
     "build": "nest build",
     "start": "node -r ts-node/register/transpile-only -r tsconfig-paths/register src/main.ts",
-    "start:dev": "nest start --watch",
+  "start:dev": "nest start --watch",
+  "dev": "npm run prisma:generate && npm run start:dev",
     "start:prod": "node dist/main.js",
     "lint": "eslint src --ext .ts",
     "demo:parser": "ts-node scripts/parser.ts",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev --name init",
+  "prisma:generate": "prisma generate",
+  "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio"
   },
   "dependencies": {
@@ -30,6 +31,7 @@
     "rxjs": "^7.8.1",
     "simple-git": "^3.27.0",
     "tree-sitter": "^0.20.1",
+  "node-tree-sitter": "^0.20.1",
     "tree-sitter-python": "^0.20.4",
     "tree-sitter-typescript": "^0.20.3"
   },

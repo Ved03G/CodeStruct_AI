@@ -9,8 +9,9 @@
   "scripts": {
     "format": "prettier --write .",
     "lint": "eslint .",
-    "dev": "docker compose up --build",
-    "down": "docker compose down -v"
+  "dev": "npm run dev -w backend & npm run dev -w frontend",
+  "dev:backend": "npm run dev -w backend",
+  "dev:frontend": "npm run dev -w frontend"
   },
   "devDependencies": {
   "prettier": "^3.3.3",

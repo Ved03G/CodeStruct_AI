@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+  "dev": "vite",
   "build": "vite build",
   "clean:src": "git rm -f --cached -r src/**/*.js src/**/*.js.map 2> NUL & del /s /q src\\*.js src\\*.js.map 2> NUL || exit 0",
     "preview": "vite preview --host",

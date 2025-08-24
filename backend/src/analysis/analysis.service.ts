@@ -13,53 +13,15 @@ export class AnalysisService {
   // Holds current file's source during analysis pass
   private currentSourceText: string | undefined;
 
-  // Tree-sitter parser and language cache (initialized once)
-  private parser: any;
-  private languages: Map<string, any>;
+  // Optional local fallback TypeScript API for normalization
   private tsApi: any | undefined;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly parserService: ParserService,
   ) {
-    // Lazy-safe init of parser and languages
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      let Parser: any;
-      try {
-        Parser = require('tree-sitter');
-      } catch (e1) {
-        // some environments ship under 'node-tree-sitter'
-        try {
-          Parser = require('node-tree-sitter');
-        } catch (e2) {
-          throw e1 || e2;
-        }
-      }
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const Ts = require('tree-sitter-typescript');
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const Py = require('tree-sitter-python');
-
-      this.parser = new Parser();
-      this.languages = new Map<string, any>([
-        ['typescript', Ts.typescript],
-        ['tsx', Ts.tsx],
-        ['python', Py],
-      ]);
-      if (process.env.ANALYSIS_DEBUG) {
-        // eslint-disable-next-line no-console
-        console.log('[analysis] Tree-sitter initialized');
-      }
-    } catch (e: any) {
-      this.parser = undefined;
-      this.languages = new Map();
-      // eslint-disable-next-line no-console
-      console.warn('[analysis] Tree-sitter not available, falling back to text heuristics');
-      // eslint-disable-next-line no-console
-      if (e?.message) console.warn('[analysis] Tree-sitter init error:', e.message);
-    }
-
+  const th = Number(process.env.ANALYSIS_COMPLEXITY_THRESHOLD);
+  if (!Number.isNaN(th) && th > 0) this.complexityThreshold = th;
     // Try to load TypeScript API for AST-based fallback normalization
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -73,7 +35,14 @@ export class AnalysisService {
     }
   }
 
+  private dlog(...args: any[]) {
+  // Temporarily always log for deep debugging
+  // eslint-disable-next-line no-console
+  console.log('[analysis]', ...args);
+  }
+
   async startAnalysis(gitUrl: string, language: string, userId?: number): Promise<number> {
+  this.dlog('startAnalysis called', { gitUrl, language, userId, threshold: this.complexityThreshold });
     // Create project or reuse existing
     const project = await (this.prisma as any).project.upsert({
       where: { gitUrl },
@@ -104,6 +73,7 @@ export class AnalysisService {
     }
 
     // Async fire-and-forget analysis (no queue for demo)
+    this.dlog('queue analyzeRepo', { effectiveUrl, language, projectId: project.id });
   this.analyzeRepo(effectiveUrl, language, project.id).catch((err) => {
       // eslint-disable-next-line no-console
       console.error('Analysis failed', err);
@@ -119,23 +89,23 @@ export class AnalysisService {
   }
 
   private async analyzeRepo(gitUrl: string, language: string, projectId: number) {
+    this.dlog('analyzeRepo start', { gitUrl, language, projectId });
     let dir: string | undefined;
     try {
       dir = await mkdtemp(join(tmpdir(), 'codestruct-'));
       const git = simpleGit();
       await git.clone(gitUrl, dir);
-      if (process.env.ANALYSIS_DEBUG) {
-        // eslint-disable-next-line no-console
-        console.log(`[analysis] cloned into: ${dir}`);
-      }
+      this.dlog('cloned into', { dir });
 
       // Reset existing issues for re-run scenarios
       await (this.prisma as any).issue.deleteMany({ where: { projectId } });
   await (this.prisma as any).fileAst?.deleteMany?.({ where: { projectId } }).catch(() => {});
 
-      const files = await this.collectFiles(dir);
+  const files = await this.collectFiles(dir);
+  this.dlog('files collected', { count: files.length });
       // Parse all files and persist ASTs using ParserService
       const asts = await this.parserService.parseRepo(dir, language);
+  this.dlog('ASTs parsed', { count: Object.keys(asts).length });
       for (const [relPath, astObj] of Object.entries(asts)) {
         await (this.prisma as any).fileAst.create({
           data: {
@@ -147,10 +117,7 @@ export class AnalysisService {
           },
         }).catch(() => {});
       }
-      if (process.env.ANALYSIS_DEBUG) {
-        // eslint-disable-next-line no-console
-        console.log(`[analysis] total files found: ${files.length}`);
-      }
+  this.dlog('total files found', { count: files.length });
       // Store file inventory for the project (use repo-relative paths)
       try {
         await (this.prisma as any).projectFile?.deleteMany?.({ where: { projectId } });
@@ -166,34 +133,37 @@ export class AnalysisService {
   const duplicateMap = new Map<string, { file: string; text: string }[]>();
 
       let created = 0;
+      let filesVisited = 0;
+      let filesAnalyzed = 0;
       for (const file of files) {
         const displayPath = relative(dir!, file).replace(/\\/g, '/');
         const code = await readFile(file, 'utf8');
         const ext = extname(file).toLowerCase();
-        if (!this.supports(ext, language)) continue;
-        if (process.env.ANALYSIS_DEBUG) {
-          // eslint-disable-next-line no-console
-          console.log(`[analysis] analyzing: ${displayPath}`);
-        }
+        filesVisited++;
+        const supported = this.supports(ext, language);
+        if (!supported) { this.dlog('skip unsupported', { displayPath, ext, language }); continue; }
+        this.dlog('analyzing file', { displayPath, ext });
         let blocks: { start: number; end: number; text: string }[] = [];
         let astSucceeded = false;
-        // If Tree-sitter is available, prefer it for analysis
+        // Prefer ParserService's single Tree-sitter instance
         try {
-          const langKey = ext === '.py' ? 'python' : (ext === '.tsx' ? 'tsx' : 'typescript');
-          const langObj = this.languages.get(langKey);
-          if (this.parser && langObj) {
-            this.parser.setLanguage(langObj);
+          const parsed = this.parserService.parseWithTreeSitter(code, ext);
+          if (parsed) {
+            this.dlog('treesitter parsed', { displayPath, langKey: parsed.langKey });
             this.currentSourceText = code;
-            const tree = this.parser.parse(code);
-            await this.detectHighComplexity(tree, langKey, projectId, displayPath);
-            await this.detectMagicNumbers(tree, code, projectId, displayPath);
-            this.findCodeBlocksForDuplication(tree, code, displayPath, duplicateMap);
+            await this.detectHighComplexity(parsed.tree, parsed.langKey, projectId, displayPath);
+            await this.detectMagicNumbers(parsed.tree, code, projectId, displayPath);
+            this.findCodeBlocksForDuplication(parsed.tree, code, displayPath, duplicateMap);
             astSucceeded = true;
+            filesAnalyzed++;
+          } else {
+            this.dlog('treesitter unavailable', { displayPath });
           }
         } catch {}
         // Prefer JSON AST produced by ParserService
   const astObj = (asts as any)[displayPath];
   if (!astSucceeded && astObj?.ast && (astObj.format === 'tree-sitter-json' || astObj.format === 'ts-compiler-json')) {
+          this.dlog('using JSON AST fallback', { displayPath, format: astObj.format });
           try {
             const jsonAst = JSON.parse(astObj.ast);
             const funcNodes = this.findFunctionsJson(jsonAst, astObj.format);
@@ -202,12 +172,16 @@ export class AnalysisService {
               const text = code.slice(start, end);
               blocks.push({ start, end, text });
               const complexity = this.calculateComplexityJson(fn, astObj.format, code);
+              // Emit same-style debug logs for JSON fallback
+              const fnName = this.extractFunctionNameFromText(text, language);
+              console.log(`[DEBUG] Complexity Check => Function: "${fnName}", Score: ${complexity}, Threshold: ${this.complexityThreshold}`);
               if (complexity > this.complexityThreshold) {
+                console.log(`[SUCCESS] High complexity issue found for "${fnName}"`);
                 await (this.prisma as any).issue.create({
                   data: {
                     projectId,
                     filePath: displayPath,
-                    functionName: this.extractFunctionNameFromText(text, language),
+                    functionName: fnName,
                     issueType: 'HighComplexity',
                     metadata: { complexity },
                     codeBlock: text,
@@ -218,14 +192,35 @@ export class AnalysisService {
             }
             // JSON AST-based magic numbers and duplicate map
             await this.detectMagicNumbersJson(jsonAst, code, projectId, displayPath, astObj.format);
-            this.findBlocksForDuplicationJson(jsonAst, code, displayPath, duplicateMap, astObj.format);
+            // Also print duplicate debug logs in JSON fallback
+            const dupProbe: any[] = [];
+            const isBlock = (t: string) => astObj.format.startsWith('ts-compiler') ? t === 'Block' : (t === 'block' || t === 'statement_block');
+            const range = (n: any) => astObj.format.startsWith('ts-compiler') ? { s: n.pos ?? 0, e: n.end ?? 0 } : { s: n.startIndex ?? 0, e: n.endIndex ?? 0 };
+            const walkDup = (n: any) => {
+              if (!n) return;
+              if (n.type && isBlock(n.type)) {
+                const { s, e } = range(n);
+                const text = code.slice(s, e);
+                const sig = this.normalizeJsonNode(n);
+                const hash = this.simpleHash(sig);
+                console.log(`\n  [DEBUG] Duplicate Check =>\n    - HASH: ${hash}\n    - NORMALIZED: ${sig.substring(0, 100)}... \n    - ORIGINAL CODE: ${text.substring(0, 80)}...\n`);
+                dupProbe.push({ hash, text, s, e });
+                const arr = duplicateMap.get(hash) || [];
+                arr.push({ file: displayPath, text });
+                duplicateMap.set(hash, arr);
+              }
+              if (Array.isArray(n.children)) for (const c of n.children) walkDup(c);
+            };
+            walkDup(jsonAst);
             astSucceeded = funcNodes.length > 0;
+            if (astSucceeded) filesAnalyzed++;
           } catch (e) {
             // continue to fallbacks
           }
         }
         // If no JSON AST succeeded, fallback to text-based extraction
         if (!astSucceeded) {
+          this.dlog('falling back to text extraction', { displayPath });
           blocks = this.extractBlocksFallback(code, language);
           // Optional: try to persist a JSON AST via TS API for visibility
           if (this.tsApi && (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx')) {
@@ -245,9 +240,10 @@ export class AnalysisService {
         }
 
         // High complexity issues (fallback, when AST path failed)
-        if (!astSucceeded) {
+  if (!astSucceeded) {
           for (const b of blocks) {
             const complexity = this.estimateCyclomaticComplexityFromText(b.text);
+            this.dlog('Complexity(FB)', { filePath: displayPath, fn: this.extractFunctionNameFromText(b.text, language), complexity });
             if (complexity > this.complexityThreshold) {
         await (this.prisma as any).issue.create({
                 data: {
@@ -293,6 +289,7 @@ export class AnalysisService {
           const arr = duplicateMap.get(hash) || [];
           arr.push({ file: displayPath, text: b.text });
           duplicateMap.set(hash, arr);
+          this.dlog('DupBlock(FB)', { filePath: displayPath, hash, preview: b.text.slice(0, 60).replace(/\s+/g, ' ') + (b.text.length > 60 ? '…' : '') });
         }
 
   // Magic numbers detection per block (skip if AST path already handled)
@@ -315,10 +312,7 @@ export class AnalysisService {
 
       // Create duplicate issues across entire repo after scanning all files
   await this.processDuplicates(duplicateMap, projectId, language);
-  if (process.env.ANALYSIS_DEBUG) {
-    // eslint-disable-next-line no-console
-    console.log(`[analysis] total issues created: ${created}`);
-  }
+  this.dlog('analysis complete', { totalIssues: created, filesVisited, filesAnalyzed });
       // Mark project completed
       await (this.prisma as any).project.update({ where: { id: projectId }, data: { status: 'Completed' } });
     } catch (e) {
@@ -340,33 +334,35 @@ export class AnalysisService {
 
   // Quick analysis for CI: analyze changed files without persisting to DB
   async quickAnalyzeRepo(gitUrl: string, language: string, filesFilter?: string[]) {
+  this.dlog('[quick] start', { gitUrl, language, filesFilter });
     const dir = await mkdtemp(join(tmpdir(), 'codestruct-ci-'));
     const git = simpleGit();
     await git.clone(gitUrl, dir);
     const files = await this.collectFiles(dir);
+  this.dlog('[quick] files collected', { count: files.length });
     const targetFiles = filesFilter && filesFilter.length
       ? files.filter((f) => filesFilter.some((rel) => f.endsWith(rel)))
       : files;
 
     const issues: any[] = [];
-    for (const file of targetFiles) {
+  for (const file of targetFiles) {
       const code = await readFile(file, 'utf8');
       const ext = extname(file).toLowerCase();
       if (!this.supports(ext, language)) continue;
       let blocks: { start: number; end: number; text: string; node?: any }[] = [];
       try {
-        const langKey = ext === '.py' ? 'python' : (ext === '.tsx' ? 'tsx' : 'typescript');
-        const langObj = this.languages.get(langKey);
-        if (!langObj) throw new Error(`Language not initialized for ${langKey}`);
-        this.parser.setLanguage(langObj);
-        const tree = this.parser.parse(code);
+    const parsed = this.parserService.parseWithTreeSitter(code, ext);
+    if (!parsed) throw new Error('Tree-sitter unavailable');
+    const tree = parsed.tree;
         const fnTypes = ['function_declaration', 'method_definition', 'arrow_function', 'function', 'function_definition'];
         const nodes = this.queryNodes(tree, fnTypes);
         blocks = nodes.map((n: any) => ({ start: n.startIndex, end: n.endIndex, text: code.slice(n.startIndex, n.endIndex), node: n }));
+        this.dlog('[quick] AST ok', { file });
       } catch (e: any) {
         // eslint-disable-next-line no-console
         console.error(`[analysis:quick] AST parsing failed for file ${file}:`, e);
         blocks = this.extractBlocksFallback(code, language);
+        this.dlog('[quick] fallback blocks', { file, count: blocks.length });
       }
 
       for (const b of blocks) {
@@ -394,16 +390,20 @@ export class AnalysisService {
       }
     }
 
-    return { projectName: this.deriveProjectName(gitUrl), issues };
+  this.dlog('[quick] done', { issues: issues.length });
+  return { projectName: this.deriveProjectName(gitUrl), issues };
   }
 
   private supports(ext: string, language: string) {
-    const ts = ['.ts', '.tsx', '.js', '.jsx'];
-    const py = ['.py'];
-    const l = language.toLowerCase();
-    if (l.includes('ts') || l.includes('js')) return ts.includes(ext);
-    if (l.includes('py')) return py.includes(ext);
-    return false;
+  const ts = ['.ts', '.tsx', '.js', '.jsx'];
+  const py = ['.py'];
+  const l = (language || '').toLowerCase();
+  const wantsTs = ['ts', 'tsx', 'js', 'jsx', 'typescript', 'javascript', 'node'].some((k) => l.includes(k));
+  const wantsPy = ['py', 'python'].some((k) => l.includes(k));
+  if (wantsTs) return ts.includes(ext);
+  if (wantsPy) return py.includes(ext);
+  // If language not specified clearly, default to allow common TS/JS
+  return ts.includes(ext);
   }
 
   private async collectFiles(root: string) {
@@ -515,9 +515,12 @@ export class AnalysisService {
     if (ignoreTypes.has(node.type)) return '';
     // Replace identifiers generically
     const identifierTypes = new Set(['identifier', 'property_identifier']);
-    if (identifierTypes.has(node.type)) {
-      return '(ID)';
-    }
+  if (identifierTypes.has(node.type)) return '(ID)';
+  // Replace string/number literals generically
+  const stringLike = new Set(['string', 'string_fragment', 'template_string', 'template_substitution', 'template_literal']);
+  if (stringLike.has(node.type)) return '(STR)';
+  const numberLike = new Set(['number', 'integer', 'float', 'decimal_integer', 'float_number', 'numeric_literal']);
+  if (numberLike.has(node.type)) return '(NUM)';
     let result = `(${node.type}`;
     if (Array.isArray(node.namedChildren)) {
       for (const child of node.namedChildren) {
@@ -721,19 +724,41 @@ export class AnalysisService {
   private async detectHighComplexity(ast: any, language: string, projectId: number, filePath: string) {
     if (!ast?.rootNode) return;
     const lang = language.toLowerCase();
-    // Query functions
-    const fnTypes = ['function_declaration', 'method_definition', 'arrow_function', 'function_definition'];
-    const nodes = this.queryNodes(ast, fnTypes);
+    // Prefer query-based function discovery when possible
+    let nodes: any[] = [];
+    const fnQuery = `
+      [
+        (function_declaration name: (identifier) @fn)
+        (method_definition name: (property_identifier) @fn)
+        (arrow_function) @fn
+        (function_definition name: (identifier) @fn)
+      ]
+    `;
+    const captures = this.parserService.runQueryOnTree(ast.rootNode, lang.includes('py') ? 'python' : (lang.includes('tsx') ? 'tsx' : 'typescript'), fnQuery);
+    if (captures && captures.length) {
+      // Deduce nodes from captures (capture names may repeat; use node uniqueness)
+      const seen = new Set<any>();
+      for (const c of captures) {
+        if (!seen.has(c.node)) { seen.add(c.node); nodes.push(c.node); }
+      }
+    } else {
+      const fnTypes = ['function_declaration', 'method_definition', 'arrow_function', 'function_definition'];
+      nodes = this.queryNodes(ast, fnTypes);
+    }
     for (const node of nodes) {
       const src = this.currentSourceText || '';
       const code = src.slice(node.startIndex ?? 0, node.endIndex ?? 0);
       const complexity = this.estimateCyclomaticComplexityAstTreeSitter(node, lang, src);
+      const fnName = this.extractFunctionNameFromText(code, language);
+      // Deep debug log per function
+      console.log(`[DEBUG] Complexity Check => Function: "${fnName}", Score: ${complexity}, Threshold: ${this.complexityThreshold}`);
       if (complexity > this.complexityThreshold) {
+        console.log(`[SUCCESS] High complexity issue found for "${fnName}"`);
         await (this.prisma as any).issue.create({
           data: {
             projectId,
             filePath,
-            functionName: this.extractFunctionNameFromText(code, language),
+            functionName: fnName,
             issueType: 'HighComplexity',
             metadata: { complexity },
             codeBlock: code,
@@ -777,9 +802,12 @@ export class AnalysisService {
       const norm = this.normalizeNode(b);
       const hash = this.simpleHash(norm);
       const text = fileContent.slice(b.startIndex, b.endIndex);
+  // Deep debug log for duplicate hashing/normalization
+  console.log(`\n  [DEBUG] Duplicate Check =>\n    - HASH: ${hash}\n    - NORMALIZED: ${norm.substring(0, 100)}... \n    - ORIGINAL CODE: ${text.substring(0, 80)}...\n`);
       const arr = duplicateMap.get(hash) || [];
       arr.push({ file: filePath, text, start: b.startIndex, end: b.endIndex });
       duplicateMap.set(hash, arr);
+  this.dlog('DupBlock', { filePath, hash, preview: text.slice(0, 60).replace(/\s+/g, ' ') + (text.length > 60 ? '…' : '') });
     }
   }
 
@@ -793,6 +821,14 @@ export class AnalysisService {
       if (!n) return;
       if (numTypes.has(n.type)) {
         const v = Number(codeBlock.slice(n.startIndex, n.endIndex));
+        // Deep debug logs for magic numbers
+        if (!Number.isNaN(v)) {
+          if (ignoreList.has(v)) {
+            console.log(`[DEBUG] Magic Number => Found ${v}, but it is on the ignore list.`);
+          } else {
+            console.log(`[DEBUG] Magic Number => Found potential magic number: ${v}`);
+          }
+        }
         if (!Number.isNaN(v) && !ignoreList.has(v)) {
           found.set(v, (found.get(v) || 0) + 1);
         }
@@ -804,6 +840,7 @@ export class AnalysisService {
     };
     walk(ast.rootNode);
     for (const [value, count] of found) {
+  this.dlog('MagicNumber', { filePath, value, count });
       await (this.prisma as any).issue.create({
         data: {
           projectId,
@@ -819,8 +856,9 @@ export class AnalysisService {
 
   // After-scan: process duplicates map
   private async processDuplicates(duplicateMap: Map<string, any[]>, projectId: number, language: string) {
-    for (const [, list] of duplicateMap.entries()) {
+    for (const [hash, list] of duplicateMap.entries()) {
       if (list.length > 1) {
+        this.dlog('Duplicate group', { hash, count: list.length, files: Array.from(new Set(list.map(i => i.file))) });
         for (const item of list) {
           await (this.prisma as any).issue.create({
             data: {
@@ -902,7 +940,14 @@ export class AnalysisService {
       if (n.type && isNum(n.type)) {
         const { s, e } = range(n);
         const v = Number(code.slice(s, e).replace(/_/g, ''));
-        if (!Number.isNaN(v) && !ignore.has(v)) nums.set(v, (nums.get(v) || 0) + 1);
+        if (!Number.isNaN(v)) {
+          if (ignore.has(v)) {
+            console.log(`[DEBUG] Magic Number => Found ${v}, but it is on the ignore list.`);
+          } else {
+            console.log(`[DEBUG] Magic Number => Found potential magic number: ${v}`);
+            nums.set(v, (nums.get(v) || 0) + 1);
+          }
+        }
       }
       if (Array.isArray(n.children)) for (const c of n.children) walk(c);
     };
@@ -942,8 +987,12 @@ export class AnalysisService {
 
   private normalizeJsonNode(node: any): string {
     if (!node) return '';
-    const idNames = new Set(['Identifier', 'identifier', 'property_identifier']);
-    if (idNames.has(node.type)) return '(IDENTIFIER)';
+  const idNames = new Set(['Identifier', 'identifier', 'property_identifier']);
+  if (idNames.has(node.type)) return '(ID)';
+  const stringLike = new Set(['StringLiteral', 'TemplateExpression', 'NoSubstitutionTemplateLiteral', 'String', 'string', 'string_fragment', 'template_string']);
+  if (stringLike.has(node.type)) return '(STR)';
+  const numberLike = new Set(['NumericLiteral', 'FirstLiteralToken', 'Number', 'number', 'integer', 'float', 'decimal_integer']);
+  if (numberLike.has(node.type)) return '(NUM)';
     let out = `(${node.type}`;
     if (Array.isArray(node.children)) for (const c of node.children) out += this.normalizeJsonNode(c);
     out += ')';
