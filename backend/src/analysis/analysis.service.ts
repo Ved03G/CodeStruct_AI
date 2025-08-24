@@ -20,8 +20,8 @@ export class AnalysisService {
     private readonly prisma: PrismaService,
     private readonly parserService: ParserService,
   ) {
-  const th = Number(process.env.ANALYSIS_COMPLEXITY_THRESHOLD);
-  if (!Number.isNaN(th) && th > 0) this.complexityThreshold = th;
+    const th = Number(process.env.ANALYSIS_COMPLEXITY_THRESHOLD);
+    if (!Number.isNaN(th) && th > 0) this.complexityThreshold = th;
     // Try to load TypeScript API for AST-based fallback normalization
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -36,13 +36,13 @@ export class AnalysisService {
   }
 
   private dlog(...args: any[]) {
-  // Temporarily always log for deep debugging
-  // eslint-disable-next-line no-console
-  console.log('[analysis]', ...args);
+    // Temporarily always log for deep debugging
+    // eslint-disable-next-line no-console
+    console.log('[analysis]', ...args);
   }
 
-  async startAnalysis(gitUrl: string, language: string, userId?: number): Promise<number> {
-  this.dlog('startAnalysis called', { gitUrl, language, userId, threshold: this.complexityThreshold });
+  async startAnalysis(gitUrl: string, language?: string, userId?: number): Promise<number> {
+    this.dlog('startAnalysis called', { gitUrl, language, userId, threshold: this.complexityThreshold });
     // Create project or reuse existing
     const project = await (this.prisma as any).project.upsert({
       where: { gitUrl },
@@ -50,8 +50,8 @@ export class AnalysisService {
       create: {
         name: this.deriveProjectName(gitUrl),
         gitUrl,
-        language,
-    status: 'Analyzing',
+        language: language || 'auto-detect',
+        status: 'Analyzing',
         user: userId
           ? { connect: { id: userId } }
           : { create: { email: `${Date.now()}@placeholder.local` } },
@@ -69,12 +69,12 @@ export class AnalysisService {
           const encoded = encodeURIComponent(token);
           effectiveUrl = gitUrl.replace(/^https:\/\//, `https://x-access-token:${encoded}@`);
         }
-      } catch {}
+      } catch { }
     }
 
     // Async fire-and-forget analysis (no queue for demo)
-    this.dlog('queue analyzeRepo', { effectiveUrl, language, projectId: project.id });
-  this.analyzeRepo(effectiveUrl, language, project.id).catch((err) => {
+    this.dlog('queue analyzeRepo', { effectiveUrl, language: language || 'auto-detect', projectId: project.id });
+    this.analyzeRepo(effectiveUrl, language || 'auto-detect', project.id).catch((err) => {
       // eslint-disable-next-line no-console
       console.error('Analysis failed', err);
     });
@@ -83,9 +83,64 @@ export class AnalysisService {
   }
 
   private deriveProjectName(gitUrl: string) {
-  if (!gitUrl) return 'project';
-  const name = gitUrl.split('/').pop() || 'project';
+    if (!gitUrl) return 'project';
+    const name = gitUrl.split('/').pop() || 'project';
     return name.replace(/\.git$/, '');
+  }
+
+  // Automatically detect the primary language of a repository
+  private async detectLanguage(dir: string): Promise<string> {
+    try {
+      const files = await this.collectFiles(dir);
+      const extensionCounts = new Map<string, number>();
+
+      // Count file extensions
+      for (const file of files) {
+        const ext = extname(file).toLowerCase();
+        if (ext) {
+          extensionCounts.set(ext, (extensionCounts.get(ext) || 0) + 1);
+        }
+      }
+
+      // Define language detection priorities
+      const languageMap = {
+        '.java': { language: 'java', priority: 12 },
+        '.kt': { language: 'kotlin', priority: 11 },
+        '.ts': { language: 'typescript', priority: 10 },
+        '.tsx': { language: 'typescript', priority: 9 },
+        '.js': { language: 'javascript', priority: 8 },
+        '.jsx': { language: 'javascript', priority: 7 },
+        '.py': { language: 'python', priority: 6 },
+        '.cpp': { language: 'cpp', priority: 5 },
+        '.c': { language: 'c', priority: 4 },
+        '.cs': { language: 'csharp', priority: 3 },
+        '.go': { language: 'go', priority: 2 },
+        '.rs': { language: 'rust', priority: 1 },
+      };
+
+      let bestMatch = { language: 'typescript', score: 0 }; // default to typescript
+
+      // Score each language based on file count and priority
+      for (const [ext, count] of extensionCounts.entries()) {
+        const mapping = languageMap[ext as keyof typeof languageMap];
+        if (mapping) {
+          const score = count * mapping.priority;
+          if (score > bestMatch.score) {
+            bestMatch = { language: mapping.language, score };
+          }
+        }
+      }
+
+      this.dlog('language detection', {
+        extensionCounts: Object.fromEntries(extensionCounts),
+        detected: bestMatch.language
+      });
+
+      return bestMatch.language;
+    } catch (error) {
+      this.dlog('language detection failed, defaulting to typescript', { error });
+      return 'typescript';
+    }
   }
 
   private async analyzeRepo(gitUrl: string, language: string, projectId: number) {
@@ -97,15 +152,32 @@ export class AnalysisService {
       await git.clone(gitUrl, dir);
       this.dlog('cloned into', { dir });
 
+      // Auto-detect language if needed
+      let detectedLanguage = language;
+      if (language === 'auto-detect') {
+        detectedLanguage = await this.detectLanguage(dir);
+        this.dlog('detected language', { detectedLanguage });
+
+        // Update project with detected language
+        try {
+          await (this.prisma as any).project.update({
+            where: { id: projectId },
+            data: { language: detectedLanguage }
+          });
+        } catch (err) {
+          this.dlog('failed to update project language', err);
+        }
+      }
+
       // Reset existing issues for re-run scenarios
       await (this.prisma as any).issue.deleteMany({ where: { projectId } });
-  await (this.prisma as any).fileAst?.deleteMany?.({ where: { projectId } }).catch(() => {});
+      await (this.prisma as any).fileAst?.deleteMany?.({ where: { projectId } }).catch(() => { });
 
-  const files = await this.collectFiles(dir);
-  this.dlog('files collected', { count: files.length });
+      const files = await this.collectFiles(dir);
+      this.dlog('files collected', { count: files.length });
       // Parse all files and persist ASTs using ParserService
-      const asts = await this.parserService.parseRepo(dir, language);
-  this.dlog('ASTs parsed', { count: Object.keys(asts).length });
+      const asts = await this.parserService.parseRepo(dir, detectedLanguage);
+      this.dlog('ASTs parsed', { count: Object.keys(asts).length });
       for (const [relPath, astObj] of Object.entries(asts)) {
         await (this.prisma as any).fileAst.create({
           data: {
@@ -115,22 +187,22 @@ export class AnalysisService {
             astFormat: astObj.format,
             ast: String(astObj.ast).slice(0, 500000),
           },
-        }).catch(() => {});
+        }).catch(() => { });
       }
-  this.dlog('total files found', { count: files.length });
+      this.dlog('total files found', { count: files.length });
       // Store file inventory for the project (use repo-relative paths)
       try {
         await (this.prisma as any).projectFile?.deleteMany?.({ where: { projectId } });
         const batch = files.slice(0, 5000).map((p) => {
           const rel = relative(dir!, p).replace(/\\/g, '/');
           const e = extname(p).toLowerCase();
-          return { projectId, filePath: rel, ext: e, supported: this.supports(e, language) };
+          return { projectId, filePath: rel, ext: e, supported: this.supports(e, detectedLanguage) };
         });
         if (batch.length) await (this.prisma as any).projectFile?.createMany?.({ data: batch, skipDuplicates: true });
-      } catch {}
+      } catch { }
 
-  // Global duplicate map across files (structural hashes)
-  const duplicateMap = new Map<string, { file: string; text: string }[]>();
+      // Global duplicate map across files (structural hashes)
+      const duplicateMap = new Map<string, { file: string; text: string }[]>();
 
       let created = 0;
       let filesVisited = 0;
@@ -140,8 +212,8 @@ export class AnalysisService {
         const code = await readFile(file, 'utf8');
         const ext = extname(file).toLowerCase();
         filesVisited++;
-        const supported = this.supports(ext, language);
-        if (!supported) { this.dlog('skip unsupported', { displayPath, ext, language }); continue; }
+        const supported = this.supports(ext, detectedLanguage);
+        if (!supported) { this.dlog('skip unsupported', { displayPath, ext, language: detectedLanguage }); continue; }
         this.dlog('analyzing file', { displayPath, ext });
         let blocks: { start: number; end: number; text: string }[] = [];
         let astSucceeded = false;
@@ -159,10 +231,10 @@ export class AnalysisService {
           } else {
             this.dlog('treesitter unavailable', { displayPath });
           }
-        } catch {}
+        } catch { }
         // Prefer JSON AST produced by ParserService
-  const astObj = (asts as any)[displayPath];
-  if (!astSucceeded && astObj?.ast && (astObj.format === 'tree-sitter-json' || astObj.format === 'ts-compiler-json')) {
+        const astObj = (asts as any)[displayPath];
+        if (!astSucceeded && astObj?.ast && (astObj.format === 'tree-sitter-json' || astObj.format === 'ts-compiler-json')) {
           this.dlog('using JSON AST fallback', { displayPath, format: astObj.format });
           try {
             const jsonAst = JSON.parse(astObj.ast);
@@ -221,7 +293,7 @@ export class AnalysisService {
         // If no JSON AST succeeded, fallback to text-based extraction
         if (!astSucceeded) {
           this.dlog('falling back to text extraction', { displayPath });
-          blocks = this.extractBlocksFallback(code, language);
+          blocks = this.extractBlocksFallback(code, detectedLanguage);
           // Optional: try to persist a JSON AST via TS API for visibility
           if (this.tsApi && (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx')) {
             const norm = this.normalizeAndHashTsSnippet(code, ext);
@@ -234,21 +306,21 @@ export class AnalysisService {
                   astFormat: 'ts-compiler-json',
                   ast: String(norm).slice(0, 500000),
                 },
-              }).catch(() => {});
+              }).catch(() => { });
             }
           }
         }
 
         // High complexity issues (fallback, when AST path failed)
-  if (!astSucceeded) {
+        if (!astSucceeded) {
           for (const b of blocks) {
             const complexity = this.estimateCyclomaticComplexityFromText(b.text);
             this.dlog('Complexity(FB)', { filePath: displayPath, fn: this.extractFunctionNameFromText(b.text, language), complexity });
             if (complexity > this.complexityThreshold) {
-        await (this.prisma as any).issue.create({
+              await (this.prisma as any).issue.create({
                 data: {
                   projectId,
-          filePath: displayPath,
+                  filePath: displayPath,
                   functionName: this.extractFunctionNameFromText(b.text, language),
                   issueType: 'HighComplexity',
                   metadata: { complexity },
@@ -265,7 +337,7 @@ export class AnalysisService {
               await (this.prisma as any).issue.create({
                 data: {
                   projectId,
-          filePath: displayPath,
+                  filePath: displayPath,
                   functionName: null,
                   issueType: 'MagicNumber',
                   metadata: { value: m.value, count: m.count },
@@ -277,8 +349,8 @@ export class AnalysisService {
           }
         }
 
-  // Record blocks for global duplicate detection (skip if AST path already handled duplication)
-  if (!astSucceeded) for (const b of blocks) {
+        // Record blocks for global duplicate detection (skip if AST path already handled duplication)
+        if (!astSucceeded) for (const b of blocks) {
           let hash: string | undefined;
           if (this.tsApi && (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx')) {
             const normTs = this.normalizeAndHashTsSnippet(b.text, ext);
@@ -292,8 +364,8 @@ export class AnalysisService {
           this.dlog('DupBlock(FB)', { filePath: displayPath, hash, preview: b.text.slice(0, 60).replace(/\s+/g, ' ') + (b.text.length > 60 ? '…' : '') });
         }
 
-  // Magic numbers detection per block (skip if AST path already handled)
-  if (!astSucceeded) for (const b of blocks) {
+        // Magic numbers detection per block (skip if AST path already handled)
+        if (!astSucceeded) for (const b of blocks) {
           const magic = this.findMagicNumbers(b.text, language);
           for (const m of magic) {
             await (this.prisma as any).issue.create({
@@ -311,15 +383,15 @@ export class AnalysisService {
       } // end for each file
 
       // Create duplicate issues across entire repo after scanning all files
-  await this.processDuplicates(duplicateMap, projectId, language);
-  this.dlog('analysis complete', { totalIssues: created, filesVisited, filesAnalyzed });
+      await this.processDuplicates(duplicateMap, projectId, language);
+      this.dlog('analysis complete', { totalIssues: created, filesVisited, filesAnalyzed });
       // Mark project completed
       await (this.prisma as any).project.update({ where: { id: projectId }, data: { status: 'Completed' } });
     } catch (e) {
       // Mark project failed
       try {
         await (this.prisma as any).project.update({ where: { id: projectId }, data: { status: 'Failed' } });
-      } catch {}
+      } catch { }
       throw e;
     } finally {
       // Cleanup temp dir best-effort
@@ -327,33 +399,38 @@ export class AnalysisService {
         try {
           const { rm } = await import('fs/promises');
           await (rm as any)(dir, { recursive: true, force: true });
-        } catch {}
+        } catch { }
       }
     }
   }
 
   // Quick analysis for CI: analyze changed files without persisting to DB
-  async quickAnalyzeRepo(gitUrl: string, language: string, filesFilter?: string[]) {
-  this.dlog('[quick] start', { gitUrl, language, filesFilter });
+  async quickAnalyzeRepo(gitUrl: string, language?: string, filesFilter?: string[]) {
+    this.dlog('[quick] start', { gitUrl, language, filesFilter });
     const dir = await mkdtemp(join(tmpdir(), 'codestruct-ci-'));
     const git = simpleGit();
     await git.clone(gitUrl, dir);
+
+    // Auto-detect language if not provided
+    const detectedLanguage = language || await this.detectLanguage(dir);
+    this.dlog('[quick] using language', { detectedLanguage });
+
     const files = await this.collectFiles(dir);
-  this.dlog('[quick] files collected', { count: files.length });
+    this.dlog('[quick] files collected', { count: files.length });
     const targetFiles = filesFilter && filesFilter.length
       ? files.filter((f) => filesFilter.some((rel) => f.endsWith(rel)))
       : files;
 
     const issues: any[] = [];
-  for (const file of targetFiles) {
+    for (const file of targetFiles) {
       const code = await readFile(file, 'utf8');
       const ext = extname(file).toLowerCase();
-      if (!this.supports(ext, language)) continue;
+      if (!this.supports(ext, detectedLanguage)) continue;
       let blocks: { start: number; end: number; text: string; node?: any }[] = [];
       try {
-    const parsed = this.parserService.parseWithTreeSitter(code, ext);
-    if (!parsed) throw new Error('Tree-sitter unavailable');
-    const tree = parsed.tree;
+        const parsed = this.parserService.parseWithTreeSitter(code, ext);
+        if (!parsed) throw new Error('Tree-sitter unavailable');
+        const tree = parsed.tree;
         const fnTypes = ['function_declaration', 'method_definition', 'arrow_function', 'function', 'function_definition'];
         const nodes = this.queryNodes(tree, fnTypes);
         blocks = nodes.map((n: any) => ({ start: n.startIndex, end: n.endIndex, text: code.slice(n.startIndex, n.endIndex), node: n }));
@@ -361,7 +438,7 @@ export class AnalysisService {
       } catch (e: any) {
         // eslint-disable-next-line no-console
         console.error(`[analysis:quick] AST parsing failed for file ${file}:`, e);
-        blocks = this.extractBlocksFallback(code, language);
+        blocks = this.extractBlocksFallback(code, detectedLanguage);
         this.dlog('[quick] fallback blocks', { file, count: blocks.length });
       }
 
@@ -390,20 +467,29 @@ export class AnalysisService {
       }
     }
 
-  this.dlog('[quick] done', { issues: issues.length });
-  return { projectName: this.deriveProjectName(gitUrl), issues };
+    this.dlog('[quick] done', { issues: issues.length });
+    return { projectName: this.deriveProjectName(gitUrl), issues };
   }
 
   private supports(ext: string, language: string) {
-  const ts = ['.ts', '.tsx', '.js', '.jsx'];
-  const py = ['.py'];
-  const l = (language || '').toLowerCase();
-  const wantsTs = ['ts', 'tsx', 'js', 'jsx', 'typescript', 'javascript', 'node'].some((k) => l.includes(k));
-  const wantsPy = ['py', 'python'].some((k) => l.includes(k));
-  if (wantsTs) return ts.includes(ext);
-  if (wantsPy) return py.includes(ext);
-  // If language not specified clearly, default to allow common TS/JS
-  return ts.includes(ext);
+    const ts = ['.ts', '.tsx', '.js', '.jsx'];
+    const py = ['.py'];
+    const java = ['.java'];
+    const l = (language || '').toLowerCase();
+
+    const wantsTs = ['ts', 'tsx', 'js', 'jsx', 'typescript', 'javascript', 'node'].some((k) => l.includes(k));
+    const wantsPy = ['py', 'python'].some((k) => l.includes(k));
+    const wantsJava = ['java'].some((k) => l.includes(k));
+
+    if (wantsTs) return ts.includes(ext);
+    if (wantsPy) return py.includes(ext);
+    if (wantsJava) return java.includes(ext);
+
+    // If language not specified clearly, try to support based on extension
+    if (ts.includes(ext) || py.includes(ext) || java.includes(ext)) return true;
+
+    // Default fallback
+    return ts.includes(ext);
   }
 
   private async collectFiles(root: string) {
@@ -443,7 +529,7 @@ export class AnalysisService {
       const signature = code.slice(node.startIndex, node.endIndex);
       const complexity = this.estimateCyclomaticComplexity(node, code);
       if (complexity > this.complexityThreshold) {
-  await (this.prisma as any).issue.create({
+        await (this.prisma as any).issue.create({
           data: {
             projectId,
             filePath,
@@ -515,12 +601,12 @@ export class AnalysisService {
     if (ignoreTypes.has(node.type)) return '';
     // Replace identifiers generically
     const identifierTypes = new Set(['identifier', 'property_identifier']);
-  if (identifierTypes.has(node.type)) return '(ID)';
-  // Replace string/number literals generically
-  const stringLike = new Set(['string', 'string_fragment', 'template_string', 'template_substitution', 'template_literal']);
-  if (stringLike.has(node.type)) return '(STR)';
-  const numberLike = new Set(['number', 'integer', 'float', 'decimal_integer', 'float_number', 'numeric_literal']);
-  if (numberLike.has(node.type)) return '(NUM)';
+    if (identifierTypes.has(node.type)) return '(ID)';
+    // Replace string/number literals generically
+    const stringLike = new Set(['string', 'string_fragment', 'template_string', 'template_substitution', 'template_literal']);
+    if (stringLike.has(node.type)) return '(STR)';
+    const numberLike = new Set(['number', 'integer', 'float', 'decimal_integer', 'float_number', 'numeric_literal']);
+    if (numberLike.has(node.type)) return '(NUM)';
     let result = `(${node.type}`;
     if (Array.isArray(node.namedChildren)) {
       for (const child of node.namedChildren) {
@@ -660,15 +746,15 @@ export class AnalysisService {
     };
     // function declarations
     const funcRegex = /function\s+[A-Za-z_][A-Za-z0-9_]*\s*\([^)]*\)\s*\{/g;
-    for (let m; (m = funcRegex.exec(code)); ) {
+    for (let m; (m = funcRegex.exec(code));) {
       const braceIdx = m.index + m[0].lastIndexOf('{');
       const end = findMatchingBrace(braceIdx);
       if (end > braceIdx) blocks.push({ start: m.index, end: end + 1, text: code.slice(m.index, end + 1) });
     }
     // class methods and constructors
-    const reserved = new Set(['if','for','while','switch','catch','try','else','do','function']);
+    const reserved = new Set(['if', 'for', 'while', 'switch', 'catch', 'try', 'else', 'do', 'function']);
     const methodRegex = /(?:^|\n)\s*(?:public|private|protected|static|async\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\([^)]*\)\s*\{/g;
-    for (let m; (m = methodRegex.exec(code)); ) {
+    for (let m; (m = methodRegex.exec(code));) {
       const name = m[1];
       if (reserved.has(name)) continue;
       const braceIdx = m.index + m[0].lastIndexOf('{');
@@ -680,7 +766,7 @@ export class AnalysisService {
     }
     // arrow functions with block body: => { ... }
     const arrowRegex = /=>\s*\{/g;
-    for (let m; (m = arrowRegex.exec(code)); ) {
+    for (let m; (m = arrowRegex.exec(code));) {
       const braceIdx = m.index + m[0].indexOf('{');
       const end = findMatchingBrace(braceIdx);
       if (end > braceIdx) {
@@ -708,7 +794,7 @@ export class AnalysisService {
         for (; j < lines.length; j++) {
           const l = lines[j];
           const isBlank = /^\s*$/.test(l);
-          const ind = (l.match(/^([ \t]*)/) || ['',''])[1];
+          const ind = (l.match(/^([ \t]*)/) || ['', ''])[1];
           if (!isBlank && ind.length <= indent.length) break;
           endIdx += 1 + l.length; // +1 for newline
         }
@@ -771,8 +857,8 @@ export class AnalysisService {
   // Helper: complexity over Tree-sitter nodes
   private estimateCyclomaticComplexityAstTreeSitter(node: any, lang: string, code: string): number {
     let score = 1;
-    const tsDecisions = new Set(['if_statement','for_statement','while_statement','switch_statement','case_clause','binary_expression','conditional_expression']);
-    const pyDecisions = new Set(['if_statement','for_statement','while_statement','elif_clause','conditional_expression']);
+    const tsDecisions = new Set(['if_statement', 'for_statement', 'while_statement', 'switch_statement', 'case_clause', 'binary_expression', 'conditional_expression']);
+    const pyDecisions = new Set(['if_statement', 'for_statement', 'while_statement', 'elif_clause', 'conditional_expression']);
     const walk = (n: any) => {
       if (!n) return;
       const t = n.type;
@@ -802,12 +888,12 @@ export class AnalysisService {
       const norm = this.normalizeNode(b);
       const hash = this.simpleHash(norm);
       const text = fileContent.slice(b.startIndex, b.endIndex);
-  // Deep debug log for duplicate hashing/normalization
-  console.log(`\n  [DEBUG] Duplicate Check =>\n    - HASH: ${hash}\n    - NORMALIZED: ${norm.substring(0, 100)}... \n    - ORIGINAL CODE: ${text.substring(0, 80)}...\n`);
+      // Deep debug log for duplicate hashing/normalization
+      console.log(`\n  [DEBUG] Duplicate Check =>\n    - HASH: ${hash}\n    - NORMALIZED: ${norm.substring(0, 100)}... \n    - ORIGINAL CODE: ${text.substring(0, 80)}...\n`);
       const arr = duplicateMap.get(hash) || [];
       arr.push({ file: filePath, text, start: b.startIndex, end: b.endIndex });
       duplicateMap.set(hash, arr);
-  this.dlog('DupBlock', { filePath, hash, preview: text.slice(0, 60).replace(/\s+/g, ' ') + (text.length > 60 ? '…' : '') });
+      this.dlog('DupBlock', { filePath, hash, preview: text.slice(0, 60).replace(/\s+/g, ' ') + (text.length > 60 ? '…' : '') });
     }
   }
 
@@ -815,7 +901,7 @@ export class AnalysisService {
   private async detectMagicNumbers(ast: any, codeBlock: string, projectId: number, filePath: string) {
     if (!ast?.rootNode) return;
     const ignoreList = new Set([0, 1, -1]);
-    const numTypes = new Set(['number','integer','float','decimal_integer','float_number','numeric_literal']);
+    const numTypes = new Set(['number', 'integer', 'float', 'decimal_integer', 'float_number', 'numeric_literal']);
     const found: Map<number, number> = new Map();
     const walk = (n: any) => {
       if (!n) return;
@@ -840,7 +926,7 @@ export class AnalysisService {
     };
     walk(ast.rootNode);
     for (const [value, count] of found) {
-  this.dlog('MagicNumber', { filePath, value, count });
+      this.dlog('MagicNumber', { filePath, value, count });
       await (this.prisma as any).issue.create({
         data: {
           projectId,
@@ -887,7 +973,7 @@ export class AnalysisService {
       ]);
       const tsxExtra = new Set(['GetAccessor', 'SetAccessor']);
       if (format.startsWith('ts-compiler')) return tsKinds.has(t) || tsxExtra.has(t);
-    return t === 'function_declaration' || t === 'method_definition' || t === 'arrow_function' || t === 'function' || t === 'function_definition';
+      return t === 'function_declaration' || t === 'method_definition' || t === 'arrow_function' || t === 'function' || t === 'function_definition';
     };
     const walk = (n: any) => {
       if (!n) return;
@@ -987,12 +1073,12 @@ export class AnalysisService {
 
   private normalizeJsonNode(node: any): string {
     if (!node) return '';
-  const idNames = new Set(['Identifier', 'identifier', 'property_identifier']);
-  if (idNames.has(node.type)) return '(ID)';
-  const stringLike = new Set(['StringLiteral', 'TemplateExpression', 'NoSubstitutionTemplateLiteral', 'String', 'string', 'string_fragment', 'template_string']);
-  if (stringLike.has(node.type)) return '(STR)';
-  const numberLike = new Set(['NumericLiteral', 'FirstLiteralToken', 'Number', 'number', 'integer', 'float', 'decimal_integer']);
-  if (numberLike.has(node.type)) return '(NUM)';
+    const idNames = new Set(['Identifier', 'identifier', 'property_identifier']);
+    if (idNames.has(node.type)) return '(ID)';
+    const stringLike = new Set(['StringLiteral', 'TemplateExpression', 'NoSubstitutionTemplateLiteral', 'String', 'string', 'string_fragment', 'template_string']);
+    if (stringLike.has(node.type)) return '(STR)';
+    const numberLike = new Set(['NumericLiteral', 'FirstLiteralToken', 'Number', 'number', 'integer', 'float', 'decimal_integer']);
+    if (numberLike.has(node.type)) return '(NUM)';
     let out = `(${node.type}`;
     if (Array.isArray(node.children)) for (const c of node.children) out += this.normalizeJsonNode(c);
     out += ')';
