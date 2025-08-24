@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
+import DarkModeToggle from '../components/DarkModeToggle';
 
 const Dashboard: React.FC = () => {
   const [projects, setProjects] = useState<any[]>([]);
@@ -45,32 +46,33 @@ const Dashboard: React.FC = () => {
   }, []);
 
   if (loading) return <div className="p-6">Loading…</div>;
-  if (error) return <div className="p-6 text-red-600">{error}</div>;
+  if (error) return <div className="p-6 text-red-600 dark:text-red-400">{error}</div>;
 
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Dashboard</h1>
-        <div className="space-x-2">
+        <h1 className="text-2xl font-bold dark:text-white">Dashboard</h1>
+        <div className="flex items-center gap-2">
+          <DarkModeToggle />
           {user && (
-            <span className="text-slate-700">Signed in as <span className="font-semibold">{user.username || user.email || user.id}</span></span>
+            <span className="text-slate-700 dark:text-slate-300">Signed in as <span className="font-semibold">{user.username || user.email || user.id}</span></span>
           )}
           <button className="px-3 py-1 bg-slate-700 text-white rounded" onClick={logout}>Logout</button>
           <button className="px-3 py-1 bg-green-600 text-white rounded" onClick={linkProject}>Link New Project</button>
         </div>
       </div>
       <section className="space-y-2">
-        <h2 className="text-xl font-semibold">Analyzed projects</h2>
+        <h2 className="text-xl font-semibold dark:text-white">Analyzed projects</h2>
         <div className="grid gap-3">
           {projects.map((p) => (
-            <Link key={p.id} to={`/project/${p.id}`} className="block border rounded p-4 bg-white shadow-sm hover:shadow transition">
+            <Link key={p.id} to={`/project/${p.id}`} className="block border rounded p-4 bg-white dark:bg-slate-800 dark:border-slate-700 shadow-sm hover:shadow transition">
               <div className="flex items-center justify-between">
-                <div className="font-semibold truncate mr-2">{p.name}</div>
+                <div className="font-semibold truncate mr-2 dark:text-slate-100">{p.name}</div>
                 <span className={`text-xs px-2 py-0.5 rounded-full ${p.status === 'Completed' ? 'bg-emerald-100 text-emerald-700' : p.status === 'Analyzing' ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-700'}`}>{p.status || 'Unknown'}</span>
               </div>
-              <div className="text-xs text-gray-600 mt-1">Language: {p.language}</div>
+              <div className="text-xs text-gray-600 dark:text-slate-300 mt-1">Language: {p.language}</div>
               <div className="text-sm mt-2 flex flex-wrap gap-2">
-                <span className="inline-flex items-center gap-1 text-xs bg-slate-100 text-slate-700 px-2 py-0.5 rounded">Total {p.issueSummary.total}</span>
+                <span className="inline-flex items-center gap-1 text-xs bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-100 px-2 py-0.5 rounded">Total {p.issueSummary.total}</span>
                 <span className="inline-flex items-center gap-1 text-xs bg-orange-100 text-orange-800 px-2 py-0.5 rounded">HC {p.issueSummary.highComplexity}</span>
                 <span className="inline-flex items-center gap-1 text-xs bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded">Dup {p.issueSummary.duplicateCode}</span>
                 {typeof p.issueSummary.magicNumbers === 'number' && (
@@ -80,21 +82,21 @@ const Dashboard: React.FC = () => {
             </Link>
           ))}
           {projects.length === 0 && (
-            <div className="text-slate-600">No projects yet. Link one or analyze a repo below.</div>
+            <div className="text-slate-600 dark:text-slate-300">No projects yet. Link one or analyze a repo below.</div>
           )}
         </div>
       </section>
 
       <section className="space-y-2">
-        <h2 className="text-xl font-semibold">Your repositories</h2>
+        <h2 className="text-xl font-semibold dark:text-white">Your repositories</h2>
         {!repos ? (
           <div>Loading repos…</div>
         ) : (
           <div className="grid gap-3 sm:grid-cols-2">
             {repos.map((r) => (
-              <div key={r.id} className="border rounded p-4 bg-white">
-                <div className="font-semibold">{r.name}</div>
-                <div className="text-sm text-slate-600">{r.private ? 'Private' : 'Public'}</div>
+              <div key={r.id} className="border rounded p-4 bg-white dark:bg-slate-800 dark:border-slate-700">
+                <div className="font-semibold dark:text-slate-100">{r.name}</div>
+                <div className="text-sm text-slate-600 dark:text-slate-300">{r.private ? 'Private' : 'Public'}</div>
                 <div className="mt-3">
                   <button
                     onClick={async () => {

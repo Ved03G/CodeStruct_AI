@@ -8,7 +8,10 @@ import { join, extname, relative } from 'path';
 
 @Injectable()
 export class AnalysisService {
-  private complexityThreshold = 6; // lower threshold for more findings
+  private complexityThreshold = 3; // aggressive threshold for clearer findings
+
+  // Holds current file's source during analysis pass
+  private currentSourceText: string | undefined;
 
   // Tree-sitter parser and language cache (initialized once)
   private parser: any;
@@ -20,9 +23,19 @@ export class AnalysisService {
     private readonly parserService: ParserService,
   ) {
     // Lazy-safe init of parser and languages
-  try {
+    try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const Parser = require('tree-sitter');
+      let Parser: any;
+      try {
+        Parser = require('tree-sitter');
+      } catch (e1) {
+        // some environments ship under 'node-tree-sitter'
+        try {
+          Parser = require('node-tree-sitter');
+        } catch (e2) {
+          throw e1 || e2;
+        }
+      }
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const Ts = require('tree-sitter-typescript');
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -38,11 +51,13 @@ export class AnalysisService {
         // eslint-disable-next-line no-console
         console.log('[analysis] Tree-sitter initialized');
       }
-    } catch (e) {
+    } catch (e: any) {
       this.parser = undefined;
       this.languages = new Map();
       // eslint-disable-next-line no-console
       console.warn('[analysis] Tree-sitter not available, falling back to text heuristics');
+      // eslint-disable-next-line no-console
+      if (e?.message) console.warn('[analysis] Tree-sitter init error:', e.message);
     }
 
     // Try to load TypeScript API for AST-based fallback normalization
@@ -162,9 +177,23 @@ export class AnalysisService {
         }
         let blocks: { start: number; end: number; text: string }[] = [];
         let astSucceeded = false;
+        // If Tree-sitter is available, prefer it for analysis
+        try {
+          const langKey = ext === '.py' ? 'python' : (ext === '.tsx' ? 'tsx' : 'typescript');
+          const langObj = this.languages.get(langKey);
+          if (this.parser && langObj) {
+            this.parser.setLanguage(langObj);
+            this.currentSourceText = code;
+            const tree = this.parser.parse(code);
+            await this.detectHighComplexity(tree, langKey, projectId, displayPath);
+            await this.detectMagicNumbers(tree, code, projectId, displayPath);
+            this.findCodeBlocksForDuplication(tree, code, displayPath, duplicateMap);
+            astSucceeded = true;
+          }
+        } catch {}
         // Prefer JSON AST produced by ParserService
-        const astObj = (asts as any)[displayPath];
-        if (astObj?.ast && (astObj.format === 'tree-sitter-json' || astObj.format === 'ts-compiler-json')) {
+  const astObj = (asts as any)[displayPath];
+  if (!astSucceeded && astObj?.ast && (astObj.format === 'tree-sitter-json' || astObj.format === 'ts-compiler-json')) {
           try {
             const jsonAst = JSON.parse(astObj.ast);
             const funcNodes = this.findFunctionsJson(jsonAst, astObj.format);
@@ -172,7 +201,7 @@ export class AnalysisService {
               const { start, end } = this.getRangeFromJsonNode(fn, astObj.format);
               const text = code.slice(start, end);
               blocks.push({ start, end, text });
-              const complexity = this.calculateComplexityJson(fn, astObj.format);
+              const complexity = this.calculateComplexityJson(fn, astObj.format, code);
               if (complexity > this.complexityThreshold) {
                 await (this.prisma as any).issue.create({
                   data: {
@@ -187,6 +216,9 @@ export class AnalysisService {
                 created++;
               }
             }
+            // JSON AST-based magic numbers and duplicate map
+            await this.detectMagicNumbersJson(jsonAst, code, projectId, displayPath, astObj.format);
+            this.findBlocksForDuplicationJson(jsonAst, code, displayPath, duplicateMap, astObj.format);
             astSucceeded = funcNodes.length > 0;
           } catch (e) {
             // continue to fallbacks
@@ -249,8 +281,8 @@ export class AnalysisService {
           }
         }
 
-        // Record blocks for global duplicate detection
-        for (const b of blocks) {
+  // Record blocks for global duplicate detection (skip if AST path already handled duplication)
+  if (!astSucceeded) for (const b of blocks) {
           let hash: string | undefined;
           if (this.tsApi && (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx')) {
             const normTs = this.normalizeAndHashTsSnippet(b.text, ext);
@@ -263,8 +295,8 @@ export class AnalysisService {
           duplicateMap.set(hash, arr);
         }
 
-        // Magic numbers detection per block
-        for (const b of blocks) {
+  // Magic numbers detection per block (skip if AST path already handled)
+  if (!astSucceeded) for (const b of blocks) {
           const magic = this.findMagicNumbers(b.text, language);
           for (const m of magic) {
             await (this.prisma as any).issue.create({
@@ -282,23 +314,7 @@ export class AnalysisService {
       } // end for each file
 
       // Create duplicate issues across entire repo after scanning all files
-  for (const [_, list] of duplicateMap.entries()) {
-        if (list.length > 1) {
-          for (const item of list) {
-            await (this.prisma as any).issue.create({
-              data: {
-                projectId,
-                filePath: item.file,
-                functionName: this.extractFunctionNameFromText(item.text, language),
-                issueType: 'DuplicateCode',
-                metadata: { duplicates: list.length },
-                codeBlock: item.text,
-              },
-            });
-    created++;
-          }
-        }
-      }
+  await this.processDuplicates(duplicateMap, projectId, language);
   if (process.env.ANALYSIS_DEBUG) {
     // eslint-disable-next-line no-console
     console.log(`[analysis] total issues created: ${created}`);
@@ -701,6 +717,129 @@ export class AnalysisService {
     return blocks;
   }
 
+  // Task 1: High Complexity with Tree-sitter
+  private async detectHighComplexity(ast: any, language: string, projectId: number, filePath: string) {
+    if (!ast?.rootNode) return;
+    const lang = language.toLowerCase();
+    // Query functions
+    const fnTypes = ['function_declaration', 'method_definition', 'arrow_function', 'function_definition'];
+    const nodes = this.queryNodes(ast, fnTypes);
+    for (const node of nodes) {
+      const src = this.currentSourceText || '';
+      const code = src.slice(node.startIndex ?? 0, node.endIndex ?? 0);
+      const complexity = this.estimateCyclomaticComplexityAstTreeSitter(node, lang, src);
+      if (complexity > this.complexityThreshold) {
+        await (this.prisma as any).issue.create({
+          data: {
+            projectId,
+            filePath,
+            functionName: this.extractFunctionNameFromText(code, language),
+            issueType: 'HighComplexity',
+            metadata: { complexity },
+            codeBlock: code,
+          },
+        });
+      }
+    }
+  }
+
+  // Helper: complexity over Tree-sitter nodes
+  private estimateCyclomaticComplexityAstTreeSitter(node: any, lang: string, code: string): number {
+    let score = 1;
+    const tsDecisions = new Set(['if_statement','for_statement','while_statement','switch_statement','case_clause','binary_expression','conditional_expression']);
+    const pyDecisions = new Set(['if_statement','for_statement','while_statement','elif_clause','conditional_expression']);
+    const walk = (n: any) => {
+      if (!n) return;
+      const t = n.type;
+      if (lang.includes('python')) {
+        if (pyDecisions.has(t)) score++;
+      } else {
+        if (t === 'binary_expression') {
+          const txt = code.slice(n.startIndex ?? 0, n.endIndex ?? 0);
+          if (txt.includes('&&') || txt.includes('||')) score++;
+        } else if (tsDecisions.has(t)) score++;
+      }
+      for (let i = 0; i < (n.namedChildCount ?? 0); i++) walk(n.namedChild(i));
+      if (!(n.namedChildCount > 0) && n.childCount) {
+        for (let i = 0; i < n.childCount; i++) walk(n.child(i));
+      }
+    };
+    walk(node);
+    return score;
+  }
+
+  // Task 2: Duplicate blocks with Tree-sitter
+  private findCodeBlocksForDuplication(ast: any, fileContent: string, filePath: string, duplicateMap: Map<string, any[]>) {
+    if (!ast?.rootNode) return;
+    const blockTypes = ['statement_block', 'block'];
+    const blocks = this.queryNodes(ast, blockTypes);
+    for (const b of blocks) {
+      const norm = this.normalizeNode(b);
+      const hash = this.simpleHash(norm);
+      const text = fileContent.slice(b.startIndex, b.endIndex);
+      const arr = duplicateMap.get(hash) || [];
+      arr.push({ file: filePath, text, start: b.startIndex, end: b.endIndex });
+      duplicateMap.set(hash, arr);
+    }
+  }
+
+  // Task 3: Magic numbers with Tree-sitter
+  private async detectMagicNumbers(ast: any, codeBlock: string, projectId: number, filePath: string) {
+    if (!ast?.rootNode) return;
+    const ignoreList = new Set([0, 1, -1]);
+    const numTypes = new Set(['number','integer','float','decimal_integer','float_number','numeric_literal']);
+    const found: Map<number, number> = new Map();
+    const walk = (n: any) => {
+      if (!n) return;
+      if (numTypes.has(n.type)) {
+        const v = Number(codeBlock.slice(n.startIndex, n.endIndex));
+        if (!Number.isNaN(v) && !ignoreList.has(v)) {
+          found.set(v, (found.get(v) || 0) + 1);
+        }
+      }
+      for (let i = 0; i < (n.namedChildCount ?? 0); i++) walk(n.namedChild(i));
+      if (!(n.namedChildCount > 0) && n.childCount) {
+        for (let i = 0; i < n.childCount; i++) walk(n.child(i));
+      }
+    };
+    walk(ast.rootNode);
+    for (const [value, count] of found) {
+      await (this.prisma as any).issue.create({
+        data: {
+          projectId,
+          filePath,
+          functionName: null,
+          issueType: 'MagicNumber',
+          metadata: { value, count },
+          codeBlock: codeBlock.slice(0, Math.min(2000, codeBlock.length)),
+        },
+      });
+    }
+  }
+
+  // After-scan: process duplicates map
+  private async processDuplicates(duplicateMap: Map<string, any[]>, projectId: number, language: string) {
+    for (const [, list] of duplicateMap.entries()) {
+      if (list.length > 1) {
+        for (const item of list) {
+          await (this.prisma as any).issue.create({
+            data: {
+              projectId,
+              filePath: item.file,
+              functionName: this.extractFunctionNameFromText(item.text, language),
+              issueType: 'DuplicateCode',
+              metadata: { duplicates: list.length },
+              codeBlock: item.text,
+            },
+          });
+        }
+      }
+    }
+  }
+
+  // Utility to read TS node code (using indices)
+  // removed unused readNodeCode helper
+
   // JSON AST helpers
   private findFunctionsJson(root: any, format: string): any[] {
     const out: any[] = [];
@@ -723,7 +862,7 @@ export class AnalysisService {
     return out;
   }
 
-  private calculateComplexityJson(node: any, format: string): number {
+  private calculateComplexityJson(node: any, format: string, code: string): number {
     let score = 1;
     const tsDecisions = new Set([
       'IfStatement', 'ForStatement', 'WhileStatement', 'DoStatement', 'CaseClause', 'DefaultClause', 'CatchClause', 'ConditionalExpression', 'BinaryExpression',
@@ -734,7 +873,10 @@ export class AnalysisService {
       if (!n) return;
       if (format.startsWith('ts-compiler-json')) {
         if (tsDecisions.has(n.type)) score++;
-        if (tsLogicalKinds.has(n.type) && typeof n.operatorToken === 'string' && tsOps.has(n.operatorToken)) score++;
+        if (n.type === 'BinaryExpression') {
+          const txt = code.slice(n.pos ?? 0, n.end ?? 0);
+          if (txt.includes('&&') || txt.includes('||')) score++;
+        }
       } else {
         const tsLikeDec = new Set([
           'if_statement', 'for_statement', 'while_statement', 'do_statement', 'case_clause', 'default_clause', 'catch_clause', 'conditional_expression', 'binary_expression', 'logical_expression',
@@ -745,6 +887,67 @@ export class AnalysisService {
     };
     walk(node);
     return score;
+  }
+
+  private async detectMagicNumbersJson(root: any, code: string, projectId: number, filePath: string, format: string) {
+    const ignore = new Set([0, 1, -1]);
+    const nums = new Map<number, number>();
+    const isNum = (t: string) => {
+      if (format.startsWith('ts-compiler')) return t === 'NumericLiteral' || t === 'FirstLiteralToken';
+      return t === 'number' || t === 'integer' || t === 'float' || t === 'float_number' || t === 'decimal_integer';
+    };
+    const range = (n: any) => format.startsWith('ts-compiler') ? { s: n.pos ?? 0, e: n.end ?? 0 } : { s: n.startIndex ?? 0, e: n.endIndex ?? 0 };
+    const walk = (n: any) => {
+      if (!n) return;
+      if (n.type && isNum(n.type)) {
+        const { s, e } = range(n);
+        const v = Number(code.slice(s, e).replace(/_/g, ''));
+        if (!Number.isNaN(v) && !ignore.has(v)) nums.set(v, (nums.get(v) || 0) + 1);
+      }
+      if (Array.isArray(n.children)) for (const c of n.children) walk(c);
+    };
+    walk(root);
+    for (const [value, count] of nums) {
+      await (this.prisma as any).issue.create({
+        data: {
+          projectId,
+          filePath,
+          functionName: null,
+          issueType: 'MagicNumber',
+          metadata: { value, count },
+          codeBlock: code.slice(0, Math.min(code.length, 2000)),
+        },
+      });
+    }
+  }
+
+  private findBlocksForDuplicationJson(root: any, code: string, filePath: string, duplicateMap: Map<string, any[]>, format: string) {
+    const isBlock = (t: string) => format.startsWith('ts-compiler') ? t === 'Block' : (t === 'block' || t === 'statement_block');
+    const range = (n: any) => format.startsWith('ts-compiler') ? { s: n.pos ?? 0, e: n.end ?? 0 } : { s: n.startIndex ?? 0, e: n.endIndex ?? 0 };
+    const walk = (n: any) => {
+      if (!n) return;
+      if (n.type && isBlock(n.type)) {
+        const { s, e } = range(n);
+        const text = code.slice(s, e);
+        const sig = this.normalizeJsonNode(n);
+        const hash = this.simpleHash(sig);
+        const arr = duplicateMap.get(hash) || [];
+        arr.push({ file: filePath, text, start: s, end: e });
+        duplicateMap.set(hash, arr);
+      }
+      if (Array.isArray(n.children)) for (const c of n.children) walk(c);
+    };
+    walk(root);
+  }
+
+  private normalizeJsonNode(node: any): string {
+    if (!node) return '';
+    const idNames = new Set(['Identifier', 'identifier', 'property_identifier']);
+    if (idNames.has(node.type)) return '(IDENTIFIER)';
+    let out = `(${node.type}`;
+    if (Array.isArray(node.children)) for (const c of node.children) out += this.normalizeJsonNode(c);
+    out += ')';
+    return out;
   }
 
   private getRangeFromJsonNode(node: any, format: string): { start: number; end: number } {

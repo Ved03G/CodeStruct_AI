@@ -6,6 +6,11 @@ node_modules/
 .build/
 dist/
 build/
+frontend/dist/
+
+# Prevent checked-in compiled artifacts in src
+frontend/src/**/*.js
+frontend/src/**/*.js.map
 
 # Logs
 npm-debug.log*

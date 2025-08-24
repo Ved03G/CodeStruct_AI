@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
+import DarkModeToggle from '../components/DarkModeToggle';
 import MagicBento from "../components/MagicBento";
 
 const Landing: React.FC = () => {
@@ -39,22 +40,25 @@ const Landing: React.FC = () => {
   if (!me) return <div className="p-6">Loading…</div>;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-950 text-slate-900 dark:text-slate-100">
       <header className="relative z-50 p-6 flex items-center justify-between">
-        <div className="text-2xl font-bold text-slate-800">CodeStruct.AI</div>
-        <nav className="space-x-6">
-          <Link to="/dashboard" className="text-slate-700 hover:text-slate-900 font-medium transition-colors">Dashboard</Link>
-        </nav>
+        <div className="text-2xl font-bold text-slate-800 dark:text-slate-100">CodeStruct.AI</div>
+        <div className="flex items-center gap-4">
+          <nav className="space-x-6">
+            <Link to="/dashboard" className="text-slate-700 hover:text-slate-900 dark:text-slate-200 dark:hover:text-white font-medium transition-colors">Dashboard</Link>
+          </nav>
+          <DarkModeToggle />
+        </div>
       </header>
 
       {/* Hero Section */}
       <section className="relative py-20 px-6">
         <div className="max-w-7xl mx-auto text-center">
           <div className="relative">
-            <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-slate-900 mb-6">
+            <h1 className="text-5xl md:text-7xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-6">
               Tame your <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">codebase</span>
             </h1>
-            <p className="text-xl md:text-2xl text-slate-600 mb-8 max-w-3xl mx-auto">
+            <p className="text-xl md:text-2xl text-slate-600 dark:text-slate-300 mb-8 max-w-3xl mx-auto">
               Analyze complexity, spot duplication, and generate safe refactors powered by AI.
             </p>
 
@@ -67,14 +71,14 @@ const Landing: React.FC = () => {
                 Sign in with GitHub
               </button>
             ) : (
-              <div className="bg-white/80 backdrop-blur-sm border border-slate-200 rounded-xl px-6 py-3 inline-block shadow-lg">
-                <span className="text-slate-700">Signed in as </span>
-                <span className="font-semibold text-blue-600">{me.user?.username}</span>
+              <div className="bg-white/80 dark:bg-slate-800/60 backdrop-blur-sm border border-slate-200 dark:border-slate-700 rounded-xl px-6 py-3 inline-block shadow-lg">
+                <span className="text-slate-700 dark:text-slate-200">Signed in as </span>
+                <span className="font-semibold text-blue-600 dark:text-blue-400">{me.user?.username}</span>
               </div>
             )}
 
             {error && (
-              <div className="mt-6 bg-red-50 border border-red-200 text-red-600 rounded-xl p-4 max-w-md mx-auto">
+              <div className="mt-6 bg-red-50 dark:bg-red-900/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-300 rounded-xl p-4 max-w-md mx-auto">
                 {error}
               </div>
             )}
@@ -84,7 +88,7 @@ const Landing: React.FC = () => {
 
       {/* Bento Grid Features */}
 
-      <section className="relative py-8">
+  <section className="relative py-8">
         <MagicBento
           textAutoHide={true}
           enableStars={true}

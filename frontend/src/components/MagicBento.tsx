@@ -583,15 +583,29 @@ const MagicBento: React.FC<BentoProps> = ({
             --glow-intensity: 0;
             --glow-radius: 200px;
             --glow-color: ${glowColor};
-            --border-color: #e5e7eb;
-            --background-light: #ffffff;
-            --black: hsl(0, 0%, 0%);
+                        /* light theme defaults */
+                        --bg-start: #f8fafc; /* slate-50 */
+                        --bg-end: #f1f5f9;   /* slate-100 */
+                        --text-color: #0f172a; /* slate-900 */
+                        --card-bg: #ffffff;    /* white */
+                        --border-color: #e5e7eb; /* slate-200 */
+                        --black: hsl(0, 0%, 0%);
             --purple-primary: rgba(132, 0, 255, 1);
             --purple-glow: rgba(132, 0, 255, 0.2);
             --purple-border: rgba(132, 0, 255, 0.8);
-            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+                        background: linear-gradient(135deg, var(--bg-start) 0%, var(--bg-end) 100%);
+                        color: var(--text-color);
             min-height: 600px;
           }
+
+                    /* dark theme overrides */
+                    .dark .bento-section {
+                        --bg-start: #0b1220; /* slate-900-ish */
+                        --bg-end: #020617;   /* slate-950 */
+                        --text-color: #e2e8f0; /* slate-200 */
+                        --card-bg: rgba(2, 6, 23, 0.7); /* translucent slate-950 */
+                        --border-color: #334155; /* slate-700 */
+                    }
           
           .card-responsive {
             grid-template-columns: 1fr;
@@ -600,6 +614,23 @@ const MagicBento: React.FC<BentoProps> = ({
             margin: 0 auto;
             padding: 1rem;
           }
+
+                    /* Ensure cards inherit theme colors */
+                    .bento-section .card {
+                        background-color: var(--card-bg);
+                        color: var(--text-color);
+                        border-color: var(--border-color);
+                    }
+                    .dark .bento-section .card {
+                        background-color: var(--card-bg);
+                        color: var(--text-color);
+                        border-color: var(--border-color);
+                    }
+                    .bento-section .card .card__label,
+                    .bento-section .card .card__title,
+                    .bento-section .card .card__description {
+                        color: var(--text-color);
+                    }
           
           @media (min-width: 600px) {
             .card-responsive {
@@ -722,9 +753,9 @@ const MagicBento: React.FC<BentoProps> = ({
                             }`;
 
                         const cardStyle = {
-                            backgroundColor: card.color || "var(--background-light)",
+                            backgroundColor: "var(--card-bg)",
                             borderColor: "var(--border-color)",
-                            color: "var(--black)",
+                            color: "var(--text-color)",
                             "--glow-x": "50%",
                             "--glow-y": "50%",
                             "--glow-intensity": "0",
@@ -744,10 +775,10 @@ const MagicBento: React.FC<BentoProps> = ({
                                     clickEffect={clickEffect}
                                     enableMagnetism={enableMagnetism}
                                 >
-                                    <div className="card__header flex justify-between gap-3 relative text-black">
+                                    <div className="card__header flex justify-between gap-3 relative">
                                         <span className="card__label text-base">{card.label}</span>
                                     </div>
-                                    <div className="card__content flex flex-col relative text-black">
+                                    <div className="card__content flex flex-col relative">
                                         <h3
                                             className={`card__title font-normal text-base m-0 mb-1 ${textAutoHide ? "text-clamp-1" : ""}`}
                                         >
@@ -878,10 +909,10 @@ const MagicBento: React.FC<BentoProps> = ({
                                     el.addEventListener("click", handleClick);
                                 }}
                             >
-                                <div className="card__header flex justify-between gap-3 relative text-black">
+                                <div className="card__header flex justify-between gap-3 relative">
                                     <span className="card__label text-base">{card.label}</span>
                                 </div>
-                                <div className="card__content flex flex-col relative text-black">
+                                <div className="card__content flex flex-col relative">
                                     <h3
                                         className={`card__title font-normal text-base m-0 mb-1 ${textAutoHide ? "text-clamp-1" : ""}`}
                                     >
