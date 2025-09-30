@@ -26,8 +26,9 @@ export interface DuplicateGroup {
 
 @Injectable()
 export class DuplicationDetectionService {
-    private readonly MIN_DUPLICATE_LINES = 6;
-    private readonly MIN_DUPLICATE_TOKENS = 50;
+    private readonly MIN_DUPLICATE_LINES = 8;         // Increased: Need at least 8 meaningful lines
+    private readonly MIN_DUPLICATE_TOKENS = 100;      // Increased: More tokens for real logic
+    private readonly MIN_COMPLEXITY_SCORE = 5;        // New: Minimum complexity threshold
     private readonly SIMILARITY_THRESHOLD = 0.85;
     private readonly SEMANTIC_SIMILARITY_THRESHOLD = 0.75;
 
@@ -73,6 +74,14 @@ export class DuplicationDetectionService {
                 for (let i = 0; i <= lines.length - windowSize; i++) {
                     const window = lines.slice(i, i + windowSize);
                     const normalizedWindow = this.normalizeLines(window);
+                    
+                    // Skip if not enough meaningful lines after normalization
+                    if (normalizedWindow.length < this.MIN_DUPLICATE_LINES) continue;
+                    
+                    // Check if this code block has sufficient complexity
+                    const complexityScore = this.calculateCodeComplexity(normalizedWindow);
+                    if (complexityScore < this.MIN_COMPLEXITY_SCORE) continue;
+                    
                     const hash = this.hashLines(normalizedWindow);
 
                     const duplicateBlock: DuplicateBlock = {
@@ -266,7 +275,50 @@ export class DuplicationDetectionService {
                 .replace(/\s+/g, ' ') // Normalize whitespace
                 .replace(/;$/, '') // Remove trailing semicolons
                 .trim();
-        }).filter(line => line.length > 0);
+        }).filter(line => {
+            // Filter out empty lines
+            if (line.length === 0) return false;
+            
+            // Filter out common patterns that shouldn't be flagged as duplicates
+            return !this.isCommonPattern(line);
+        });
+    }
+
+    /**
+     * Check if a line represents a common pattern that shouldn't be flagged as duplicate
+     */
+    private isCommonPattern(line: string): boolean {
+        const trimmed = line.trim();
+        
+        // Skip import/export statements
+        if (/^(import|export)\s/.test(trimmed)) return true;
+        
+        // Skip require statements
+        if (/^(const|let|var)\s+.+\s*=\s*require\s*\(/.test(trimmed)) return true;
+        
+        // Skip common React patterns
+        if (/^(import\s+React|from\s+['"]react['"]|useState|useEffect|useCallback|useMemo)/.test(trimmed)) return true;
+        
+        // Skip simple variable declarations with common patterns
+        if (/^(const|let|var)\s+\w+\s*=\s*(true|false|null|undefined|\[\]|\{\})/.test(trimmed)) return true;
+        
+        // Skip simple return statements
+        if (/^return\s+(true|false|null|undefined|\[\]|\{\})/.test(trimmed)) return true;
+        
+        // Skip common TypeScript/JavaScript patterns
+        if (/^(interface|type|enum)\s+\w+/.test(trimmed)) return true;
+        if (/^(public|private|protected)\s+/.test(trimmed)) return true;
+        
+        // Skip simple closing brackets/braces
+        if (/^[\}\]\)],?\s*$/.test(trimmed)) return true;
+        
+        // Skip simple opening brackets/braces
+        if (/^[\{\[\(]\s*$/.test(trimmed)) return true;
+        
+        // Skip very short lines (likely not meaningful duplicates)
+        if (trimmed.length < 10) return true;
+        
+        return false;
     }
 
     /**
@@ -475,5 +527,50 @@ export class DuplicationDetectionService {
         };
 
         return keywordMap[language.toLowerCase()] || keywordMap.typescript;
+    }
+
+    /**
+     * Calculate a simple complexity score for code lines
+     * Higher scores indicate more complex/meaningful code
+     */
+    private calculateCodeComplexity(lines: string[]): number {
+        let score = 0;
+
+        for (const line of lines) {
+            const trimmed = line.trim();
+            
+            // Control flow adds complexity
+            if (/\b(if|else|for|while|switch|case|try|catch|finally)\b/.test(trimmed)) {
+                score += 3;
+            }
+            
+            // Function calls add complexity  
+            if (/\w+\s*\([^)]*\)/.test(trimmed)) {
+                score += 2;
+            }
+            
+            // Object/array operations add complexity
+            if (/[\[\]{}]/.test(trimmed) && !/^[\s\[\]{}]*$/.test(trimmed)) {
+                score += 1;
+            }
+            
+            // Assignment operations add complexity
+            if (/=/.test(trimmed) && !/^(const|let|var)\s+\w+\s*=\s*(true|false|null|undefined|\d+|""|'')/.test(trimmed)) {
+                score += 1;
+            }
+            
+            // Logical operators add complexity
+            if (/(\|\||&&|!==|===|[<>]=?)/.test(trimmed)) {
+                score += 2;
+            }
+            
+            // Each meaningful word adds base complexity
+            const meaningfulWords = trimmed.split(/\s+/).filter(word => 
+                word.length > 2 && !/^(const|let|var|return|if|else)$/.test(word)
+            );
+            score += meaningfulWords.length * 0.5;
+        }
+
+        return score;
     }
 }
