@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { ParserService } from '../parser/parser.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { EnhancedAnalysisService } from './enhanced-analysis.service';
+import { DuplicationDetectionService } from './duplication-detection.service';
 import simpleGit from 'simple-git';
 import { tmpdir } from 'os';
 import { mkdtemp, readdir, readFile } from 'fs/promises';
@@ -19,6 +21,8 @@ export class AnalysisService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly parserService: ParserService,
+    private readonly enhancedAnalysisService: EnhancedAnalysisService,
+    private readonly duplicationDetectionService: DuplicationDetectionService,
   ) {
     const th = Number(process.env.ANALYSIS_COMPLEXITY_THRESHOLD);
     if (!Number.isNaN(th) && th > 0) this.complexityThreshold = th;
@@ -201,60 +205,90 @@ export class AnalysisService {
         if (batch.length) await (this.prisma as any).projectFile?.createMany?.({ data: batch, skipDuplicates: true });
       } catch { }
 
-      // Global duplicate map across files (structural hashes)
-      const duplicateMap = new Map<string, { file: string; text: string }[]>();
-
+      // Enhanced analysis using new services
+      const codeBlocks: Array<{ code: string; filePath: string; startIndex: number; endIndex: number; ast?: any }> = [];
       let created = 0;
       let filesVisited = 0;
       let filesAnalyzed = 0;
+
       for (const file of files) {
         const displayPath = relative(dir!, file).replace(/\\/g, '/');
         const code = await readFile(file, 'utf8');
         const ext = extname(file).toLowerCase();
         filesVisited++;
         const supported = this.supports(ext, detectedLanguage);
-        if (!supported) { this.dlog('skip unsupported', { displayPath, ext, language: detectedLanguage }); continue; }
+
+        if (!supported) {
+          this.dlog('skip unsupported', { displayPath, ext, language: detectedLanguage });
+          continue;
+        }
+
         this.dlog('analyzing file', { displayPath, ext });
-        let blocks: { start: number; end: number; text: string }[] = [];
+
         let astSucceeded = false;
-        // Prefer ParserService's single Tree-sitter instance
+        let ast: any = null;
+
+        // Try Tree-sitter parsing first
         try {
           const parsed = this.parserService.parseWithTreeSitter(code, ext);
           if (parsed) {
             this.dlog('treesitter parsed', { displayPath, langKey: parsed.langKey });
-            this.currentSourceText = code;
-            await this.detectHighComplexity(parsed.tree, parsed.langKey, projectId, displayPath);
-            await this.detectMagicNumbers(parsed.tree, code, projectId, displayPath);
-            this.findCodeBlocksForDuplication(parsed.tree, code, displayPath, duplicateMap);
+            ast = parsed.tree;
+
+            // Use enhanced analysis service
+            const issues = await this.enhancedAnalysisService.analyzeCodeSmells(
+              ast,
+              code,
+              displayPath,
+              parsed.langKey,
+              projectId
+            );
+
+            created += issues.length;
             astSucceeded = true;
             filesAnalyzed++;
-          } else {
-            this.dlog('treesitter unavailable', { displayPath });
+
+            // Add to code blocks for duplicate detection (with size limits)
+            if (code.length <= 50000) { // Skip very large files for duplicate detection
+              codeBlocks.push({
+                code: code.slice(0, 10000), // Limit code size for duplicate detection
+                filePath: displayPath,
+                startIndex: 0,
+                endIndex: Math.min(code.length, 10000),
+                ast
+              });
+            }
           }
-        } catch { }
-        // Prefer JSON AST produced by ParserService
+        } catch (error: any) {
+          this.dlog('treesitter parsing failed', { displayPath, error: error?.message || 'Unknown error' });
+        }
+
+        // Fallback to JSON AST if available
         const astObj = (asts as any)[displayPath];
         if (!astSucceeded && astObj?.ast && (astObj.format === 'tree-sitter-json' || astObj.format === 'ts-compiler-json')) {
           this.dlog('using JSON AST fallback', { displayPath, format: astObj.format });
           try {
             const jsonAst = JSON.parse(astObj.ast);
+
+            // Basic complexity analysis for fallback
             const funcNodes = this.findFunctionsJson(jsonAst, astObj.format);
             for (const fn of funcNodes) {
               const { start, end } = this.getRangeFromJsonNode(fn, astObj.format);
               const text = code.slice(start, end);
-              blocks.push({ start, end, text });
               const complexity = this.calculateComplexityJson(fn, astObj.format, code);
-              // Emit same-style debug logs for JSON fallback
-              const fnName = this.extractFunctionNameFromText(text, language);
-              console.log(`[DEBUG] Complexity Check => Function: "${fnName}", Score: ${complexity}, Threshold: ${this.complexityThreshold}`);
+              const fnName = this.extractFunctionNameFromText(text, detectedLanguage);
+
               if (complexity > this.complexityThreshold) {
-                console.log(`[SUCCESS] High complexity issue found for "${fnName}"`);
                 await (this.prisma as any).issue.create({
                   data: {
                     projectId,
                     filePath: displayPath,
                     functionName: fnName,
                     issueType: 'HighComplexity',
+                    severity: complexity > 15 ? 'High' : complexity > 10 ? 'Medium' : 'Low',
+                    confidence: 80,
+                    description: `Function '${fnName}' has high cyclomatic complexity (${complexity})`,
+                    recommendation: 'Consider breaking this function into smaller, more focused functions.',
                     metadata: { complexity },
                     codeBlock: text,
                   },
@@ -262,128 +296,134 @@ export class AnalysisService {
                 created++;
               }
             }
-            // JSON AST-based magic numbers and duplicate map
-            await this.detectMagicNumbersJson(jsonAst, code, projectId, displayPath, astObj.format);
-            // Also print duplicate debug logs in JSON fallback
-            const dupProbe: any[] = [];
-            const isBlock = (t: string) => astObj.format.startsWith('ts-compiler') ? t === 'Block' : (t === 'block' || t === 'statement_block');
-            const range = (n: any) => astObj.format.startsWith('ts-compiler') ? { s: n.pos ?? 0, e: n.end ?? 0 } : { s: n.startIndex ?? 0, e: n.endIndex ?? 0 };
-            const walkDup = (n: any) => {
-              if (!n) return;
-              if (n.type && isBlock(n.type)) {
-                const { s, e } = range(n);
-                const text = code.slice(s, e);
-                const sig = this.normalizeJsonNode(n);
-                const hash = this.simpleHash(sig);
-                console.log(`\n  [DEBUG] Duplicate Check =>\n    - HASH: ${hash}\n    - NORMALIZED: ${sig.substring(0, 100)}... \n    - ORIGINAL CODE: ${text.substring(0, 80)}...\n`);
-                dupProbe.push({ hash, text, s, e });
-                const arr = duplicateMap.get(hash) || [];
-                arr.push({ file: displayPath, text });
-                duplicateMap.set(hash, arr);
-              }
-              if (Array.isArray(n.children)) for (const c of n.children) walkDup(c);
-            };
-            walkDup(jsonAst);
-            astSucceeded = funcNodes.length > 0;
-            if (astSucceeded) filesAnalyzed++;
-          } catch (e) {
-            // continue to fallbacks
-          }
-        }
-        // If no JSON AST succeeded, fallback to text-based extraction
-        if (!astSucceeded) {
-          this.dlog('falling back to text extraction', { displayPath });
-          blocks = this.extractBlocksFallback(code, detectedLanguage);
-          // Optional: try to persist a JSON AST via TS API for visibility
-          if (this.tsApi && (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx')) {
-            const norm = this.normalizeAndHashTsSnippet(code, ext);
-            if (norm) {
-              await (this.prisma as any).fileAst.create({
-                data: {
-                  projectId,
-                  filePath: displayPath,
-                  language: 'typescript-like',
-                  astFormat: 'ts-compiler-json',
-                  ast: String(norm).slice(0, 500000),
-                },
-              }).catch(() => { });
-            }
+
+            astSucceeded = true;
+            filesAnalyzed++;
+
+            codeBlocks.push({
+              code,
+              filePath: displayPath,
+              startIndex: 0,
+              endIndex: code.length
+            });
+          } catch (error: any) {
+            this.dlog('JSON AST parsing failed', { displayPath, error: error?.message || 'Unknown error' });
           }
         }
 
-        // High complexity issues (fallback, when AST path failed)
+        // Final fallback to text-based analysis
         if (!astSucceeded) {
-          for (const b of blocks) {
-            const complexity = this.estimateCyclomaticComplexityFromText(b.text);
-            this.dlog('Complexity(FB)', { filePath: displayPath, fn: this.extractFunctionNameFromText(b.text, language), complexity });
+          this.dlog('falling back to text extraction', { displayPath });
+          const blocks = this.extractBlocksFallback(code, detectedLanguage);
+
+          for (const block of blocks) {
+            const complexity = this.estimateCyclomaticComplexityFromText(block.text);
+            const fnName = this.extractFunctionNameFromText(block.text, detectedLanguage);
+
             if (complexity > this.complexityThreshold) {
               await (this.prisma as any).issue.create({
                 data: {
                   projectId,
                   filePath: displayPath,
-                  functionName: this.extractFunctionNameFromText(b.text, language),
+                  functionName: fnName,
                   issueType: 'HighComplexity',
+                  severity: complexity > 15 ? 'High' : complexity > 10 ? 'Medium' : 'Low',
+                  confidence: 60,
+                  description: `Function '${fnName}' has high cyclomatic complexity (${complexity})`,
+                  recommendation: 'Consider breaking this function into smaller, more focused functions.',
                   metadata: { complexity },
-                  codeBlock: b.text,
+                  codeBlock: block.text,
                 },
               });
               created++;
             }
           }
-          // As a last resort, run magic-number detection over entire file if no blocks
-          if (!blocks.length) {
-            const magicWhole = this.findMagicNumbers(code, language);
-            for (const m of magicWhole) {
-              await (this.prisma as any).issue.create({
-                data: {
-                  projectId,
-                  filePath: displayPath,
-                  functionName: null,
-                  issueType: 'MagicNumber',
-                  metadata: { value: m.value, count: m.count },
-                  codeBlock: code.slice(0, Math.min(code.length, 2000)),
-                },
-              });
-              created++;
-            }
-          }
-        }
 
-        // Record blocks for global duplicate detection (skip if AST path already handled duplication)
-        if (!astSucceeded) for (const b of blocks) {
-          let hash: string | undefined;
-          if (this.tsApi && (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx')) {
-            const normTs = this.normalizeAndHashTsSnippet(b.text, ext);
-            hash = this.simpleHash(normTs || this.normalizeAstLike(b.text));
-          } else {
-            hash = this.simpleHash(this.normalizeAstLike(b.text));
-          }
-          const arr = duplicateMap.get(hash) || [];
-          arr.push({ file: displayPath, text: b.text });
-          duplicateMap.set(hash, arr);
-          this.dlog('DupBlock(FB)', { filePath: displayPath, hash, preview: b.text.slice(0, 60).replace(/\s+/g, ' ') + (b.text.length > 60 ? '…' : '') });
-        }
-
-        // Magic numbers detection per block (skip if AST path already handled)
-        if (!astSucceeded) for (const b of blocks) {
-          const magic = this.findMagicNumbers(b.text, language);
-          for (const m of magic) {
-            await (this.prisma as any).issue.create({
-              data: {
-                projectId,
-                filePath: displayPath,
-                functionName: this.extractFunctionNameFromText(b.text, language),
-                issueType: 'MagicNumber',
-                metadata: { value: m.value, count: m.count },
-                codeBlock: b.text,
-              },
+          // Add to code blocks for duplicate detection (with size limits)
+          if (code.length <= 50000) { // Skip very large files for duplicate detection
+            codeBlocks.push({
+              code: code.slice(0, 10000), // Limit code size for duplicate detection
+              filePath: displayPath,
+              startIndex: 0,
+              endIndex: Math.min(code.length, 10000)
             });
           }
         }
-      } // end for each file
+      }
 
-      // Create duplicate issues across entire repo after scanning all files
-      await this.processDuplicates(duplicateMap, projectId, language);
+      // Enhanced duplicate detection with memory optimization
+      this.dlog('starting enhanced duplicate detection', { codeBlockCount: codeBlocks.length });
+
+      try {
+        // Process in smaller batches to prevent memory overflow
+        const batchSize = 50; // Process 50 code blocks at a time
+        const allGroups: any[] = [];
+
+        for (let i = 0; i < codeBlocks.length; i += batchSize) {
+          const batch = codeBlocks.slice(i, i + batchSize);
+          this.dlog(`Processing duplicate detection batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(codeBlocks.length / batchSize)}`);
+
+          try {
+            const duplicateGroups = await this.duplicationDetectionService.detectDuplicates(
+              batch,
+              detectedLanguage
+            );
+            allGroups.push(...duplicateGroups);
+
+            // Force garbage collection if available
+            if (global.gc) {
+              global.gc();
+            }
+          } catch (batchError: any) {
+            this.dlog('batch duplicate detection failed', {
+              batch: Math.floor(i / batchSize) + 1,
+              error: batchError?.message || 'Unknown error'
+            });
+          }
+
+          // Small delay between batches
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+
+        this.dlog('duplicate detection completed', { groupCount: allGroups.length });
+
+        // Store duplicate issues
+        for (const group of allGroups) {
+          try {
+            for (const block of group.blocks) {
+              await (this.prisma as any).issue.create({
+                data: {
+                  projectId,
+                  filePath: block.filePath,
+                  functionName: null,
+                  issueType: 'DuplicateCode',
+                  severity: group.severity,
+                  confidence: Math.round(group.similarity * 100),
+                  description: `${group.type} duplicate code found (${group.blocks.length} instances across ${group.affectedFiles.length} files)`,
+                  recommendation: 'Extract common code into a shared function or module to reduce duplication.',
+                  duplicateGroupId: group.id,
+                  metadata: {
+                    duplicateType: group.type,
+                    similarity: group.similarity,
+                    totalInstances: group.blocks.length,
+                    affectedFiles: group.affectedFiles,
+                    totalLines: group.totalLines
+                  },
+                  codeBlock: block.originalCode.slice(0, 2000), // Limit size
+                },
+              });
+              created++;
+            }
+          } catch (storeError: any) {
+            this.dlog('failed to store duplicate group', {
+              groupId: group.id,
+              error: storeError?.message || 'Unknown error'
+            });
+          }
+        }
+      } catch (error: any) {
+        this.dlog('duplicate detection failed', { error: error?.message || 'Unknown error' });
+      }
       this.dlog('analysis complete', { totalIssues: created, filesVisited, filesAnalyzed });
       // Mark project completed
       await (this.prisma as any).project.update({ where: { id: projectId }, data: { status: 'Completed' } });

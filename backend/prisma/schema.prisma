@@ -37,11 +37,24 @@ model Issue {
   projectId        Int
   filePath         String
   functionName     String?
-  issueType        String   // e.g., "HighComplexity", "DuplicateCode"
-  metadata         Json?    // Store details like complexity score
+  className        String?
+  issueType        String   // e.g., "HighComplexity", "DuplicateCode", "LongMethod", "GodClass"
+  severity         String   @default("Medium") // "Low", "Medium", "High", "Critical"
+  confidence       Int      @default(75) // 0-100
+  description      String?
+  recommendation   String?
+  lineStart        Int?
+  lineEnd          Int?
+  metadata         Json?    // Store details like complexity score, metrics
   codeBlock        String
   status           String   @default("Pending") // "Pending", "Generating", "Resolved"
+  duplicateGroupId String?  // For linking duplicate code issues
   createdAt        DateTime @default(now())
+  
+  @@index([projectId])
+  @@index([issueType])
+  @@index([severity])
+  @@index([duplicateGroupId])
 }
 
 model FileAst {
