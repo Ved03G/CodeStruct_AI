@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { EnhancedIssue } from '../types/analysis';
+import AIRefactorViewer from './AIRefactorViewer';
 
 interface Props {
     issue: EnhancedIssue;
+    onRefactorAccept?: () => void;
 }
 
 const severityColors = {
@@ -32,7 +34,9 @@ const issueTypeColors = {
     FeatureEnvy: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'
 };
 
-const EnhancedIssueCard: React.FC<Props> = ({ issue }) => {
+const EnhancedIssueCard: React.FC<Props> = ({ issue, onRefactorAccept }) => {
+    const [showAIRefactor, setShowAIRefactor] = useState(false);
+    
     const getConfidenceColor = (confidence: number) => {
         if (confidence >= 90) return 'text-green-600 dark:text-green-400';
         if (confidence >= 75) return 'text-yellow-600 dark:text-yellow-400';
@@ -136,11 +140,28 @@ const EnhancedIssueCard: React.FC<Props> = ({ issue }) => {
             {/* Recommendation */}
             {issue.recommendation && (
                 <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded">
-                    <div className="text-xs font-medium text-blue-800 dark:text-blue-300 mb-1">
-                        💡 Recommendation
-                    </div>
-                    <div className="text-xs text-blue-700 dark:text-blue-300">
-                        {issue.recommendation}
+                    <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1">
+                            <div className="text-xs font-medium text-blue-800 dark:text-blue-300 mb-1">
+                                💡 Recommendation
+                            </div>
+                            <div className="text-xs text-blue-700 dark:text-blue-300">
+                                {issue.recommendation}
+                            </div>
+                        </div>
+                        {/* AI Refactor Button - Skip for LongMethod */}
+                        {issue.issueType !== 'LongMethod' && (
+                            <button
+                                onClick={() => setShowAIRefactor(true)}
+                                className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white text-xs font-medium rounded-lg transition-all shadow-sm hover:shadow flex items-center gap-1.5"
+                                title="Generate AI-powered refactoring suggestion"
+                            >
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                                </svg>
+                                AI Fix
+                            </button>
+                        )}
                     </div>
                 </div>
             )}
@@ -163,6 +184,20 @@ const EnhancedIssueCard: React.FC<Props> = ({ issue }) => {
                     {issue.codeBlock}
                 </pre>
             </div>
+
+            {/* AI Refactor Viewer Modal */}
+            {showAIRefactor && (
+                <AIRefactorViewer
+                    issueId={issue.id}
+                    issueType={issue.issueType}
+                    originalCode={issue.codeBlock}
+                    onClose={() => setShowAIRefactor(false)}
+                    onAccept={() => {
+                        setShowAIRefactor(false);
+                        if (onRefactorAccept) onRefactorAccept();
+                    }}
+                />
+            )}
         </div>
     );
 };

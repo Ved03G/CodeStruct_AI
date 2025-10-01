@@ -8,10 +8,10 @@ export class RefactoringService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly validator: ValidationService,
-  ) {}
+  ) { }
 
   async generateFix(issueId: number) {
-  const issue = await (this.prisma as any).issue.findUnique({ where: { id: issueId } });
+    const issue = await (this.prisma as any).issue.findUnique({ where: { id: issueId } });
     if (!issue) return { error: 'Issue not found' };
 
     // Construct prompt based on issue type
@@ -33,9 +33,8 @@ export class RefactoringService {
   private buildPrompt(issueType: string, code: string, functionName?: string, language: 'typescript' | 'python' = 'typescript') {
     const langName = language === 'python' ? 'Python' : 'TypeScript';
     if (issueType === 'HighComplexity') {
-      return `You are an expert ${langName} refactoring assistant. Refactor the following function to reduce cyclomatic complexity. Keep the ORIGINAL function name${
-        functionName ? ` (${functionName})` : ''
-      } and signature exactly the same. Prefer extracting small, single-purpose helper functions. Return ONLY valid ${langName} code for the refactored function.\n\n` + code;
+      return `You are an expert ${langName} refactoring assistant. Refactor the following function to reduce cyclomatic complexity. Keep the ORIGINAL function name${functionName ? ` (${functionName})` : ''
+        } and signature exactly the same. Prefer extracting small, single-purpose helper functions. Return ONLY valid ${langName} code for the refactored function.\n\n` + code;
     }
     if (issueType === 'DuplicateCode') {
       return `You are an expert ${langName} refactoring assistant. Refactor the following code to remove duplication while keeping behavior identical. Preserve public function signatures. Return ONLY valid ${langName} code.\n\n` + code;
@@ -58,7 +57,7 @@ export class RefactoringService {
       return prompt.split('\n').slice(-50).join('\n');
     }
 
-    const model = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
+    const model = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const body = {

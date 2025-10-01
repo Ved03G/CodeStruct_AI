@@ -32,29 +32,47 @@ model Project {
 }
 
 model Issue {
-  id               Int      @id @default(autoincrement())
-  project          Project  @relation(fields: [projectId], references: [id])
+  id               Int                      @id @default(autoincrement())
+  project          Project                  @relation(fields: [projectId], references: [id])
   projectId        Int
   filePath         String
   functionName     String?
   className        String?
-  issueType        String   // e.g., "HighComplexity", "DuplicateCode", "LongMethod", "GodClass"
-  severity         String   @default("Medium") // "Low", "Medium", "High", "Critical"
-  confidence       Int      @default(75) // 0-100
+  issueType        String                   // e.g., "HighComplexity", "DuplicateCode", "LongMethod", "GodClass"
+  severity         String                   @default("Medium") // "Low", "Medium", "High", "Critical"
+  confidence       Int                      @default(75) // 0-100
   description      String?
   recommendation   String?
   lineStart        Int?
   lineEnd          Int?
-  metadata         Json?    // Store details like complexity score, metrics
+  metadata         Json?                    // Store details like complexity score, metrics
   codeBlock        String
-  status           String   @default("Pending") // "Pending", "Generating", "Resolved"
-  duplicateGroupId String?  // For linking duplicate code issues
-  createdAt        DateTime @default(now())
+  status           String                   @default("Pending") // "Pending", "Generating", "Resolved"
+  duplicateGroupId String?                  // For linking duplicate code issues
+  refactoringSuggestions RefactoringSuggestion[]
+  createdAt        DateTime                 @default(now())
   
   @@index([projectId])
   @@index([issueType])
   @@index([severity])
   @@index([duplicateGroupId])
+}
+
+model RefactoringSuggestion {
+  id              Int      @id @default(autoincrement())
+  issue           Issue    @relation(fields: [issueId], references: [id])
+  issueId         Int
+  originalCode    String
+  refactoredCode  String
+  explanation     String
+  confidence      Int      @default(75) // 0-100
+  changes         Json     // Array of change objects
+  status          String   @default("pending") // "pending", "accepted", "rejected"
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  
+  @@index([issueId])
+  @@index([status])
 }
 
 model FileAst {
