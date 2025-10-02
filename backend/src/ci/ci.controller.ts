@@ -4,7 +4,7 @@ import { AuthGuard } from '../auth/auth.guard';
 
 class AnalyzePrDto {
   repoUrl!: string;
-  language!: string; // 'typescript' | 'python' | etc.
+  language?: string; // 'typescript' | 'python' | etc. - now optional for auto-detection
   branch?: string; // optional
   files?: string[]; // changed files relative paths
 }

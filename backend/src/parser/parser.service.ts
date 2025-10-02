@@ -34,13 +34,7 @@ export class ParserService {
   constructor() {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      let Parser: any;
-      try {
-        Parser = require('tree-sitter');
-      } catch (e1) {
-        // some environments ship under 'node-tree-sitter'
-        Parser = require('node-tree-sitter');
-      }
+      const Parser = require('tree-sitter');
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const Ts = require('tree-sitter-typescript');
       // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -126,7 +120,7 @@ export class ParserService {
           format = 'tree-sitter-json';
           lang = parsed.langKey;
         }
-      } catch {}
+      } catch { }
       // Fallback to TS compiler for JS/TS/TSX
       if (!ast && this.tsApi && (ext === '.ts' || ext === '.tsx' || ext === '.js' || ext === '.jsx')) {
         try {
@@ -148,7 +142,7 @@ export class ParserService {
           ast = JSON.stringify(serialize(sf), null, 2);
           format = 'ts-compiler-json';
           lang = 'typescript-like';
-        } catch {}
+        } catch { }
       }
       if (ast) {
         asts[relPath] = { ast, format, language: lang };
