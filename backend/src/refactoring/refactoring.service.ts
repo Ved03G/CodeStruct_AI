@@ -27,7 +27,8 @@ export class RefactoringService {
       return { error: 'Generated fix failed validation' };
     }
 
-    return { suggestedCode: suggestion };
+    // Return both keys for compatibility with different clients
+    return { suggestedCode: suggestion, refactoredCode: suggestion };
   }
 
   private buildPrompt(issueType: string, code: string, functionName?: string, language: 'typescript' | 'python' = 'typescript') {
