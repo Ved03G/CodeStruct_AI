@@ -1,4 +1,4 @@
-import { Controller, Param, Post, Get, UseGuards, HttpException, HttpStatus } from '@nestjs/common';
+import { Controller, Param, Post, Get, UseGuards, HttpException, HttpStatus, Body } from '@nestjs/common';
 import { RefactoringService } from './refactoring.service';
 import { AIRefactoringService } from './ai-refactoring.service';
 import { AuthGuard } from '../auth/auth.guard';
@@ -15,6 +15,38 @@ export class RefactoringController {
   async generateFix(@Param('id') id: string) {
     const result = await this.refactoringService.generateFix(Number(id));
     return result;
+  }
+
+  /**
+   * Bulk fix multiple issues at once
+   */
+  @Post('bulk/generate-fixes')
+  async bulkGenerateFixes(@Body() body: { issueIds: number[]; projectId: number }) {
+    console.log('Bulk generate fixes endpoint called with:', body);
+    
+    try {
+      const results = await this.refactoringService.bulkGenerateFixes(body.issueIds, body.projectId);
+      console.log('Bulk generate fixes completed, results:', results.length);
+      
+      return {
+        success: true,
+        results: results,
+        summary: {
+          total: body.issueIds.length,
+          successful: results.filter((r: any) => r.success).length,
+          failed: results.filter((r: any) => !r.success).length,
+        }
+      };
+    } catch (error: any) {
+      console.error('Bulk generate fixes error:', error);
+      throw new HttpException(
+        {
+          success: false,
+          message: error.message || 'Failed to generate bulk fixes',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
   }
 
   /**

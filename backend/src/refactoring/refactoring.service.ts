@@ -31,6 +31,72 @@ export class RefactoringService {
     return { suggestedCode: suggestion, refactoredCode: suggestion };
   }
 
+  async bulkGenerateFixes(issueIds: number[], projectId: number) {
+    console.log(`[Bulk Refactoring] Starting bulk fix for ${issueIds.length} issues in project ${projectId}`);
+    
+    const results: Array<{
+      issueId: number;
+      success: boolean;
+      suggestedCode?: string;
+      error?: string;
+      issueType?: string;
+      filePath?: string;
+    }> = [];
+
+    // Process issues in batches to avoid overwhelming the API
+    const batchSize = 5;
+    for (let i = 0; i < issueIds.length; i += batchSize) {
+      const batch = issueIds.slice(i, i + batchSize);
+      console.log(`[Bulk Refactoring] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(issueIds.length / batchSize)}`);
+
+      // Process batch in parallel
+      const batchPromises = batch.map(async (issueId) => {
+        try {
+          const result = await this.generateFix(issueId);
+          const issue = await (this.prisma as any).issue.findUnique({ where: { id: issueId } });
+          
+          if (result.error) {
+            return {
+              issueId,
+              success: false,
+              error: result.error,
+              issueType: issue?.issueType,
+              filePath: issue?.filePath,
+            };
+          }
+
+          return {
+            issueId,
+            success: true,
+            suggestedCode: result.suggestedCode,
+            issueType: issue?.issueType,
+            filePath: issue?.filePath,
+          };
+        } catch (error: any) {
+          const issue = await (this.prisma as any).issue.findUnique({ where: { id: issueId } }).catch(() => null);
+          return {
+            issueId,
+            success: false,
+            error: error.message || 'Unknown error',
+            issueType: issue?.issueType,
+            filePath: issue?.filePath,
+          };
+        }
+      });
+
+      const batchResults = await Promise.all(batchPromises);
+      results.push(...batchResults);
+
+      // Small delay between batches to be respectful to the API
+      if (i + batchSize < issueIds.length) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    console.log(`[Bulk Refactoring] Completed: ${results.filter(r => r.success).length}/${results.length} successful`);
+    return results;
+  }
+
   private buildPrompt(issueType: string, code: string, functionName?: string, language: 'typescript' | 'python' = 'typescript') {
     const langName = language === 'python' ? 'Python' : 'TypeScript';
     if (issueType === 'HighComplexity') {

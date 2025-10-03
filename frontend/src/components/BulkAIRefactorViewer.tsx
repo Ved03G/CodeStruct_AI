@@ -1,0 +1,491 @@
+import React, { useState } from 'react';
+import { api } from '../lib/api';
+import { EnhancedIssue } from '../types/analysis';
+
+interface BulkAIRefactorViewerProps {
+  issues: EnhancedIssue[];
+  projectId: number;
+  onClose: () => void;
+  onComplete?: () => void;
+}
+
+interface RefactoringResult {
+  issueId: number;
+  issueType: string;
+  success: boolean;
+  suggestion?: any;
+  error?: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  accepted?: boolean;
+  rejected?: boolean;
+}
+
+const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
+  issues,
+  projectId,
+  onClose,
+  onComplete,
+}) => {
+  const [results, setResults] = useState<RefactoringResult[]>(
+    issues.map(issue => ({
+      issueId: issue.id,
+      issueType: issue.issueType,
+      success: false,
+      status: 'pending'
+    }))
+  );
+  const [currentProcessing, setCurrentProcessing] = useState<number | null>(null);
+  const [processing, setProcessing] = useState(false);
+  const [completed, setCompleted] = useState(false);
+  const [selectedResult, setSelectedResult] = useState<RefactoringResult | null>(null);
+  const [activeTab, setActiveTab] = useState<'progress' | 'results'>('progress');
+
+  const processAllIssues = async () => {
+    setProcessing(true);
+    setCurrentProcessing(0);
+
+    for (let i = 0; i < issues.length; i++) {
+      const issue = issues[i];
+      setCurrentProcessing(i);
+      
+      // Update status to processing
+      setResults(prev => prev.map(r => 
+        r.issueId === issue.id 
+          ? { ...r, status: 'processing' as const }
+          : r
+      ));
+
+      try {
+        // Generate AI refactoring for this issue
+        const { data } = await api.post(`/issues/${issue.id}/ai-refactor`);
+        
+        if (data.success) {
+          setResults(prev => prev.map(r => 
+            r.issueId === issue.id 
+              ? { ...r, status: 'completed' as const, success: true, suggestion: data.data }
+              : r
+          ));
+        } else {
+          setResults(prev => prev.map(r => 
+            r.issueId === issue.id 
+              ? { ...r, status: 'failed' as const, success: false, error: data.message || 'Failed to generate refactoring' }
+              : r
+          ));
+        }
+      } catch (error: any) {
+        setResults(prev => prev.map(r => 
+          r.issueId === issue.id 
+            ? { ...r, status: 'failed' as const, success: false, error: error.response?.data?.message || 'Failed to generate refactoring' }
+            : r
+        ));
+      }
+
+      // Add delay between requests to avoid overwhelming the API
+      if (i < issues.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    }
+
+    setCurrentProcessing(null);
+    setProcessing(false);
+    setCompleted(true);
+    setActiveTab('results');
+  };
+
+  const acceptSuggestion = async (issueId: number) => {
+    try {
+      await api.post(`/issues/${issueId}/ai-refactor/accept`);
+      setResults(prev => prev.map(r => 
+        r.issueId === issueId 
+          ? { ...r, accepted: true }
+          : r
+      ));
+    } catch (error: any) {
+      console.error('Failed to accept suggestion:', error);
+    }
+  };
+
+  const rejectSuggestion = async (issueId: number) => {
+    try {
+      await api.post(`/issues/${issueId}/ai-refactor/reject`);
+      setResults(prev => prev.map(r => 
+        r.issueId === issueId 
+          ? { ...r, rejected: true }
+          : r
+      ));
+    } catch (error: any) {
+      console.error('Failed to reject suggestion:', error);
+    }
+  };
+
+  const acceptAllSuggestions = async () => {
+    // Only accept suggestions that are successful, not already accepted, and not explicitly rejected
+    const availableForAcceptance = results.filter(r => 
+      r.success && 
+      r.suggestion && 
+      !r.accepted && 
+      !r.rejected
+    );
+    
+    for (const result of availableForAcceptance) {
+      await acceptSuggestion(result.issueId);
+      // Small delay between accepts
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    
+    if (onComplete) onComplete();
+  };
+
+  const renderDiff = (result: RefactoringResult) => {
+    if (!result.suggestion) return null;
+
+    const originalLines = result.suggestion.originalCode.split('\n');
+    const refactoredLines = result.suggestion.refactoredCode.split('\n');
+
+    return (
+      <div className="grid grid-cols-2 gap-4">
+        {/* Original Code */}
+        <div>
+          <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 flex items-center">
+            <span className="w-3 h-3 bg-red-500 rounded-full mr-2"></span>
+            Original Code
+          </div>
+          <pre className="text-xs bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-4 overflow-x-auto max-h-96">
+            {originalLines.map((line: string, i: number) => {
+              const isChanged = result.suggestion.changes.some((c: any) => c.lineNumber === i + 1 && c.type !== 'add');
+              return (
+                <div
+                  key={i}
+                  className={`${
+                    isChanged
+                      ? 'bg-red-100 dark:bg-red-900/40 border-l-2 border-red-500 pl-2'
+                      : ''
+                  }`}
+                >
+                  <span className="text-slate-400 mr-4 select-none">{i + 1}</span>
+                  <span className="text-slate-800 dark:text-slate-200">{line}</span>
+                </div>
+              );
+            })}
+          </pre>
+        </div>
+
+        {/* Refactored Code */}
+        <div>
+          <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 flex items-center">
+            <span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
+            Refactored Code
+          </div>
+          <pre className="text-xs bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded p-4 overflow-x-auto max-h-96">
+            {refactoredLines.map((line: string, i: number) => {
+              const change = result.suggestion.changes.find((c: any) => c.lineNumber === i + 1);
+              const isChanged = !!change;
+              const isAdded = change?.type === 'add';
+              
+              return (
+                <div
+                  key={i}
+                  className={`${
+                    isAdded
+                      ? 'bg-green-100 dark:bg-green-900/40 border-l-2 border-green-500 pl-2'
+                      : isChanged
+                      ? 'bg-yellow-100 dark:bg-yellow-900/40 border-l-2 border-yellow-500 pl-2'
+                      : ''
+                  }`}
+                >
+                  <span className="text-slate-400 mr-4 select-none">{i + 1}</span>
+                  <span className="text-slate-800 dark:text-slate-200">{line}</span>
+                </div>
+              );
+            })}
+          </pre>
+        </div>
+      </div>
+    );
+  };
+
+  const progressPercentage = processing ? 
+    ((currentProcessing || 0) / issues.length) * 100 : 
+    completed ? 100 : 0;
+
+  const successfulResults = results.filter(r => r.success);
+  const failedResults = results.filter(r => r.status === 'failed');
+  const acceptedResults = results.filter(r => r.accepted);
+  const rejectedResults = results.filter(r => r.rejected);
+  const availableForAcceptance = results.filter(r => 
+    r.success && 
+    r.suggestion && 
+    !r.accepted && 
+    !r.rejected
+  );
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-7xl w-full max-h-[95vh] overflow-hidden flex flex-col">
+        {/* Header */}
+        <div className="p-6 border-b dark:border-slate-700">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                🚀 Bulk AI Refactoring
+              </h2>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+                Processing {issues.length} code issues with AI-powered refactoring
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+            >
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Progress Bar */}
+          {(processing || completed) && (
+            <div className="mt-4">
+              <div className="flex justify-between text-sm text-slate-600 dark:text-slate-400 mb-2">
+                <span>
+                  {processing ? `Processing issue ${(currentProcessing || 0) + 1} of ${issues.length}` : 'Completed'}
+                </span>
+                <span>{Math.round(progressPercentage)}%</span>
+              </div>
+              <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
+                <div 
+                  className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
+                  style={{ width: `${progressPercentage}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
+
+          {/* Tab Navigation */}
+          <div className="flex mt-4 space-x-1">
+            <button
+              onClick={() => setActiveTab('progress')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                activeTab === 'progress'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              Progress
+            </button>
+            <button
+              onClick={() => setActiveTab('results')}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                activeTab === 'results'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              Results ({successfulResults.length}/{issues.length})
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6">
+          {activeTab === 'progress' && (
+            <div className="space-y-4">
+              {!processing && !completed && (
+                <div className="text-center py-12">
+                  <div className="text-6xl mb-4">🤖</div>
+                  <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                    Ready to Process {issues.length} Issues
+                  </h3>
+                  <p className="text-slate-600 dark:text-slate-400 mb-6">
+                    Click the button below to start generating AI-powered refactoring suggestions for all selected issues
+                  </p>
+                  <button
+                    onClick={processAllIssues}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2 mx-auto"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    Start Bulk Refactoring
+                  </button>
+                </div>
+              )}
+
+              {/* Progress List */}
+              {(processing || completed) && (
+                <div className="space-y-2">
+                  {results.map((result, index) => (
+                    <div
+                      key={result.issueId}
+                      className={`p-4 rounded-lg border flex items-center justify-between ${
+                        result.status === 'completed' 
+                          ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
+                          : result.status === 'failed'
+                          ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+                          : result.status === 'processing'
+                          ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
+                          : 'bg-slate-50 dark:bg-slate-900/20 border-slate-200 dark:border-slate-800'
+                      }`}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                          result.status === 'completed' 
+                            ? 'bg-green-500 text-white'
+                            : result.status === 'failed'
+                            ? 'bg-red-500 text-white'
+                            : result.status === 'processing'
+                            ? 'bg-blue-500 text-white animate-pulse'
+                            : 'bg-slate-300 dark:bg-slate-600 text-slate-600 dark:text-slate-400'
+                        }`}>
+                          {result.status === 'completed' ? '✓' : 
+                           result.status === 'failed' ? '✗' :
+                           result.status === 'processing' ? '⚡' : index + 1}
+                        </div>
+                        <div>
+                          <div className="font-medium text-slate-900 dark:text-slate-100">
+                            Issue #{result.issueId} - {result.issueType}
+                          </div>
+                          {result.error && (
+                            <div className="text-sm text-red-600 dark:text-red-400">
+                              {result.error}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      
+                      {result.status === 'completed' && result.suggestion && (
+                        <button
+                          onClick={() => setSelectedResult(result)}
+                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 text-sm font-medium"
+                        >
+                          View Code →
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'results' && completed && (
+            <div className="space-y-6">
+              {/* Summary */}
+              <div className="grid grid-cols-4 gap-4">
+                <div className="bg-green-50 dark:bg-green-900/20 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                    {successfulResults.length}
+                  </div>
+                  <div className="text-sm text-green-700 dark:text-green-300">Successful</div>
+                </div>
+                <div className="bg-red-50 dark:bg-red-900/20 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-red-600 dark:text-red-400">
+                    {failedResults.length}
+                  </div>
+                  <div className="text-sm text-red-700 dark:text-red-300">Failed</div>
+                </div>
+                <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                    {acceptedResults.length}
+                  </div>
+                  <div className="text-sm text-blue-700 dark:text-blue-300">Accepted</div>
+                </div>
+                <div className="bg-orange-50 dark:bg-orange-900/20 rounded-lg p-4 text-center">
+                  <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+                    {rejectedResults.length}
+                  </div>
+                  <div className="text-sm text-orange-700 dark:text-orange-300">Rejected</div>
+                </div>
+              </div>
+
+              {/* Accept All Button */}
+              {availableForAcceptance.length > 0 && (
+                <div className="flex justify-center">
+                  <button
+                    onClick={acceptAllSuggestions}
+                    className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                    Accept All Available ({availableForAcceptance.length})
+                  </button>
+                </div>
+              )}
+
+              {/* Results List */}
+              <div className="space-y-4">
+                {successfulResults.map((result) => (
+                  <div
+                    key={result.issueId}
+                    className="border dark:border-slate-700 rounded-lg p-4"
+                  >
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 bg-green-500 rounded-full flex items-center justify-center text-white font-bold">
+                          ✓
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-slate-900 dark:text-slate-100">
+                            Issue #{result.issueId} - {result.issueType}
+                          </h3>
+                          <p className="text-sm text-slate-600 dark:text-slate-400">
+                            AI refactoring suggestion generated successfully
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex gap-2">
+                        {!result.accepted && !result.rejected && (
+                          <>
+                            <button
+                              onClick={() => acceptSuggestion(result.issueId)}
+                              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
+                            >
+                              Accept
+                            </button>
+                            <button
+                              onClick={() => rejectSuggestion(result.issueId)}
+                              className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded text-sm font-medium"
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+                        {result.accepted && (
+                          <span className="bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200 px-3 py-1 rounded-full text-sm font-medium">
+                            Accepted ✓
+                          </span>
+                        )}
+                        {result.rejected && (
+                          <span className="bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200 px-3 py-1 rounded-full text-sm font-medium">
+                            Rejected ✗
+                          </span>
+                        )}
+                        <button
+                          onClick={() => setSelectedResult(selectedResult?.issueId === result.issueId ? null : result)}
+                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 px-4 py-2 text-sm font-medium"
+                        >
+                          {selectedResult?.issueId === result.issueId ? 'Hide Code' : 'View Code'}
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {/* Code Diff */}
+                    {selectedResult?.issueId === result.issueId && (
+                      <div className="mt-4 border-t dark:border-slate-700 pt-4">
+                        {renderDiff(result)}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default BulkAIRefactorViewer;

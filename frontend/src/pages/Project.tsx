@@ -6,6 +6,7 @@ import EnhancedIssueCard from '../components/EnhancedIssueCard';
 import ProjectAnalyticsDashboard from '../components/ProjectAnalyticsDashboard';
 import EnhancedIssueFilters from '../components/EnhancedIssueFilters';
 import DarkModeToggle from '../components/DarkModeToggle';
+import BulkAIRefactorViewer from '../components/BulkAIRefactorViewer';
 import { EnhancedIssue, ProjectData } from '../types/analysis';
 
 const Project: React.FC = () => {
@@ -28,6 +29,14 @@ const Project: React.FC = () => {
     sortBy: 'severity' as 'severity' | 'confidence' | 'type' | 'file',
     sortOrder: 'desc' as 'asc' | 'desc'
   });
+
+  // Bulk refactoring state
+  const [showBulkRefactor, setShowBulkRefactor] = useState(false);
+
+  const handleBulkRefactor = async () => {
+    if (!data?.issues || filteredAndSortedIssues.length === 0) return;
+    setShowBulkRefactor(true);
+  };
 
   // Filter and sort issues - moved before early returns
   const filteredAndSortedIssues = React.useMemo(() => {
@@ -252,11 +261,28 @@ const Project: React.FC = () => {
 
           {/* Filters (only show on issues tab) */}
           {activeTab === 'issues' && data?.issues && (
-            <EnhancedIssueFilters
-              issues={data.issues}
-              filters={filters}
-              onFiltersChange={setFilters}
-            />
+            <div className="space-y-4">
+              <EnhancedIssueFilters
+                issues={data.issues}
+                filters={filters}
+                onFiltersChange={setFilters}
+              />
+              
+              {/* Bulk Fix Button */}
+              {filteredAndSortedIssues.length > 0 && (
+                <div className="flex justify-end">
+                  <button
+                    onClick={handleBulkRefactor}
+                    className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                    </svg>
+                    AI Fix All Issues ({filteredAndSortedIssues.length})
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -362,6 +388,21 @@ const Project: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Bulk AI Refactoring Viewer */}
+      {showBulkRefactor && (
+        <BulkAIRefactorViewer
+          issues={filteredAndSortedIssues}
+          projectId={Number(projectId)}
+          onClose={() => setShowBulkRefactor(false)}
+          onComplete={async () => {
+            // Refresh data after completion
+            const { data: refreshedData } = await api.get(`/projects/${projectId}`);
+            setData(refreshedData);
+            setShowBulkRefactor(false);
+          }}
+        />
+      )}
     </div>
   );
 };
