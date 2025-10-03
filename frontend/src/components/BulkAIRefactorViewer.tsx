@@ -59,6 +59,10 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       const suggestions: any = {};
       let hasAnySuggestions = false;
       
+      // Reset state first
+      setShowExistingResults(false);
+      setExistingSuggestions({});
+      
       for (const issue of issues) {
         try {
           console.log(`Checking suggestion for issue ${issue.id}...`);
@@ -86,16 +90,17 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
         }
       }
       
-      console.log(`Total existing suggestions found: ${Object.keys(suggestions).length}`);
+      console.log(`Total existing suggestions found: ${Object.keys(suggestions).length}, hasAnySuggestions: ${hasAnySuggestions}`);
       setExistingSuggestions(suggestions);
       setHasCheckedExisting(true);
       
-      if (hasAnySuggestions) {
-        console.log(`Found existing suggestions for ${Object.keys(suggestions).length} issues`);
+      if (hasAnySuggestions && Object.keys(suggestions).length > 0) {
+        console.log(`✅ Setting showExistingResults to true for ${Object.keys(suggestions).length} issues`);
         setShowExistingResults(true);
         loadExistingResults(suggestions);
       } else {
-        console.log('No existing suggestions found, ready for new generation');
+        console.log('❌ No existing suggestions found, staying in ready state');
+        setShowExistingResults(false);
       }
     } catch (error) {
       console.error('Error checking existing suggestions:', error);
@@ -132,6 +137,22 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
     try {
       console.log(`${forceRegenerate ? 'Force regenerating' : 'Generating missing'} suggestions...`);
       
+      // Reset states and show progress UI
+      setProcessing(true);
+      setCompleted(false);
+      setShowExistingResults(false);
+      setActiveTab('progress');
+      
+      // Initialize results for progress tracking
+      const initialResults = issues.map(issue => ({
+        issueId: issue.id,
+        issueType: issue.issueType,
+        success: false,
+        status: 'pending' as const
+      }));
+      setResults(initialResults);
+      
+      // Call the bulk regeneration endpoint
       const response = await api.post('/issues/bulk/regenerate-all', {
         projectId: projectId,
         forceRegenerate: forceRegenerate
@@ -139,11 +160,38 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       
       if (response.data.success) {
         console.log('Regeneration completed:', response.data.summary);
-        // Refresh existing suggestions
+        
+        // Mark all as completed
+        setResults(prev => prev.map(r => ({
+          ...r,
+          success: true,
+          status: 'completed' as const
+        })));
+        
+        setCompleted(true);
+        setProcessing(false);
+        
+        // Switch to results tab after completion
+        setTimeout(() => {
+          setActiveTab('results');
+        }, 1000);
+        
+        // Refresh existing suggestions to load the new data
         await checkExistingSuggestions();
+      } else {
+        throw new Error('Regeneration failed');
       }
     } catch (error) {
       console.error('Error regenerating suggestions:', error);
+      setProcessing(false);
+      setCompleted(false);
+      
+      // Mark all as failed
+      setResults(prev => prev.map(r => ({
+        ...r,
+        success: false,
+        status: 'failed' as const
+      })));
     }
   };
 
@@ -442,12 +490,13 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                     Found Existing AI Suggestions!
                   </h3>
                   <p className="text-slate-600 dark:text-slate-400 mb-6">
-                    Found {Object.keys(existingSuggestions).length} existing suggestions. Review them in the Results tab.
+                    Found {Object.keys(existingSuggestions).length} existing suggestion{Object.keys(existingSuggestions).length !== 1 ? 's' : ''}. Review them in the Results tab.
                   </p>
                   <div className="flex gap-3 justify-center">
                     <button
                       onClick={() => regenerateAllSuggestions(true)}
                       className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2"
+                      title="Delete all existing suggestions and generate new ones for all issues. This will overwrite everything."
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -457,12 +506,38 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                     <button
                       onClick={() => regenerateAllSuggestions(false)}
                       className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2"
+                      title="Only generate suggestions for issues that don't have any existing suggestions. Keeps existing suggestions unchanged."
                     >
                       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                       </svg>
                       Add Missing Only
                     </button>
+                  </div>
+                  
+                  {/* Button Explanations */}
+                  <div className="mt-4 space-y-2 text-sm text-slate-600 dark:text-slate-400">
+                    <div className="flex items-start gap-2">
+                      <span className="text-orange-600 font-medium">🔄 Regenerate All:</span>
+                      <span>Replaces all existing suggestions with new ones</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="text-blue-600 font-medium">➕ Add Missing Only:</span>
+                      <span>Keeps existing suggestions, only generates for issues without suggestions</span>
+                    </div>
+                  </div>
+                  
+                  {/* PR Status Information */}
+                  <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <h4 className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">
+                      📝 About Pull Requests
+                    </h4>
+                    <p className="text-sm text-blue-800 dark:text-blue-200 mb-2">
+                      After regenerating suggestions, you'll need to accept them and create a new Pull Request.
+                    </p>
+                    <p className="text-xs text-blue-700 dark:text-blue-300">
+                      Previous PRs remain unchanged. New suggestions require new PRs to be created.
+                    </p>
                   </div>
                 </div>
               )}
