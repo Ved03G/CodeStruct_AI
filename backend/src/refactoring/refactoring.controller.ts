@@ -74,36 +74,6 @@ export class RefactoringController {
   }
 
   /**
-   * Get existing refactoring suggestion
-   */
-  @Get(':id/ai-refactor')
-  async getAIRefactoring(@Param('id') id: string) {
-    try {
-      const suggestion = await this.aiRefactoringService.getRefactoringSuggestion(Number(id));
-      
-      if (!suggestion) {
-        return {
-          success: false,
-          message: 'No refactoring suggestion found',
-        };
-      }
-
-      return {
-        success: true,
-        data: suggestion,
-      };
-    } catch (error: any) {
-      throw new HttpException(
-        {
-          success: false,
-          message: error.message || 'Failed to fetch refactoring suggestion',
-        },
-        HttpStatus.INTERNAL_SERVER_ERROR,
-      );
-    }
-  }
-
-  /**
    * Accept a refactoring suggestion
    */
   @Post(':id/ai-refactor/accept')
@@ -155,20 +125,27 @@ export class RefactoringController {
   @Get(':id/ai-refactor')
   async getRefactoringSuggestion(@Param('id') id: string) {
     try {
+      console.log(`[Controller] Getting refactoring suggestion for issue ${id}`);
       const suggestion = await this.refactoringService.getRefactoringSuggestion(Number(id));
+      console.log(`[Controller] Service returned suggestion for issue ${id}:`, suggestion ? 'Found' : 'Not found');
+      
       if (!suggestion) {
+        console.log(`[Controller] No suggestion found for issue ${id}`);
         return {
           success: false,
           message: 'No refactoring suggestion found for this issue',
           hasSuggestion: false
         };
       }
+      
+      console.log(`[Controller] Returning suggestion for issue ${id}, status: ${suggestion.status}`);
       return {
         success: true,
         hasSuggestion: true,
         suggestion
       };
     } catch (error: any) {
+      console.error(`[Controller] Error getting suggestion for issue ${id}:`, error);
       throw new HttpException(
         {
           success: false,

@@ -16,7 +16,8 @@ export class RefactoringService {
 
     // Check if we already have a refactoring suggestion for this issue
     const existingSuggestion = await (this.prisma as any).refactoringSuggestion.findFirst({
-      where: { issueId: issueId }
+      where: { issueId: issueId },
+      orderBy: { createdAt: 'desc' } // Get the most recent suggestion
     });
 
     if (existingSuggestion) {
@@ -199,7 +200,8 @@ export class RefactoringService {
     console.log(`[Refactoring] Accepting suggestion for issue ${issueId}`);
     
     const suggestion = await (this.prisma as any).refactoringSuggestion.findFirst({
-      where: { issueId: issueId }
+      where: { issueId: issueId },
+      orderBy: { createdAt: 'desc' } // Get the most recent suggestion
     });
 
     if (!suggestion) {
@@ -218,7 +220,8 @@ export class RefactoringService {
     console.log(`[Refactoring] Rejecting suggestion for issue ${issueId}`);
     
     const suggestion = await (this.prisma as any).refactoringSuggestion.findFirst({
-      where: { issueId: issueId }
+      where: { issueId: issueId },
+      orderBy: { createdAt: 'desc' } // Get the most recent suggestion
     });
 
     if (!suggestion) {
@@ -234,14 +237,22 @@ export class RefactoringService {
   }
 
   async getRefactoringSuggestion(issueId: number) {
+    console.log(`[Service] Looking for suggestion for issueId: ${issueId}`);
+    
     const suggestion = await (this.prisma as any).refactoringSuggestion.findFirst({
       where: { issueId: issueId },
+      orderBy: { createdAt: 'desc' }, // Get the most recent suggestion
       include: { issue: true }
     });
 
+    console.log(`[Service] Database query result for issueId ${issueId}:`, suggestion ? 'Found' : 'Not found');
+    
     if (!suggestion) {
+      console.log(`[Service] No suggestion found in database for issueId: ${issueId}`);
       return null;
     }
+
+    console.log(`[Service] Found suggestion ${suggestion.id} for issue ${issueId}, status: ${suggestion.status}`);
 
     return {
       id: suggestion.id,

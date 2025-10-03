@@ -48,6 +48,8 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
 
   // Check for existing suggestions when component mounts
   React.useEffect(() => {
+    console.log('BulkAIRefactorViewer mounted, checking existing suggestions...');
+    console.log('Issues to check:', issues.map(i => ({ id: i.id, type: i.issueType })));
     checkExistingSuggestions();
   }, []);
 
@@ -59,16 +61,32 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       
       for (const issue of issues) {
         try {
+          console.log(`Checking suggestion for issue ${issue.id}...`);
           const response = await api.get(`/issues/${issue.id}/ai-refactor`);
+          console.log(`Response for issue ${issue.id}:`, response.data);
+          console.log(`Response.data keys:`, Object.keys(response.data));
+          console.log(`response.data.success:`, response.data.success);
+          console.log(`response.data.hasSuggestion:`, response.data.hasSuggestion);
+          console.log(`response.data.suggestion:`, response.data.suggestion);
+          
           if (response.data.success && response.data.hasSuggestion) {
             suggestions[issue.id] = response.data.suggestion;
             hasAnySuggestions = true;
+            console.log(`✅ Found suggestion for issue ${issue.id}, status: ${response.data.suggestion.status}`);
+          } else {
+            console.log(`❌ No suggestion found for issue ${issue.id}:`, response.data);
           }
-        } catch (error) {
-          console.log(`No existing suggestion for issue ${issue.id}`);
+        } catch (error: any) {
+          console.log(`❌ Error getting suggestion for issue ${issue.id}:`, {
+            message: error.message,
+            status: error.response?.status,
+            data: error.response?.data,
+            url: error.config?.url
+          });
         }
       }
       
+      console.log(`Total existing suggestions found: ${Object.keys(suggestions).length}`);
       setExistingSuggestions(suggestions);
       setHasCheckedExisting(true);
       
@@ -76,6 +94,8 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
         console.log(`Found existing suggestions for ${Object.keys(suggestions).length} issues`);
         setShowExistingResults(true);
         loadExistingResults(suggestions);
+      } else {
+        console.log('No existing suggestions found, ready for new generation');
       }
     } catch (error) {
       console.error('Error checking existing suggestions:', error);
