@@ -106,6 +106,9 @@ export class AuthController {
     const decoded = this.jwtService.decodeToken(token);
     const user = (req as any).user;
 
+    // Get the full user from database to check GitHub token
+    const fullUser = await this.auth.getUserById(user.id);
+
     return {
       token: {
         sub: decoded?.sub,
@@ -119,7 +122,9 @@ export class AuthController {
       user: {
         id: user.id,
         username: user.githubUsername,
-        email: user.email
+        email: user.email,
+        hasGithubToken: !!fullUser?.githubAccessToken,
+        githubTokenPrefix: fullUser?.githubAccessToken ? fullUser.githubAccessToken.substring(0, 10) + '...' : null
       }
     };
   }

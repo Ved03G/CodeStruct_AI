@@ -8,50 +8,50 @@ datasource db {
 }
 
 model User {
-  id        Int       @id @default(autoincrement())
-  email     String    @unique
-  githubId  String?   @unique
-  githubUsername String?
+  id                Int       @id @default(autoincrement())
+  email             String    @unique
+  githubId          String?   @unique
+  githubUsername    String?
   githubAccessToken String?
-  projects  Project[]
-  createdAt DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  projects          Project[]
 }
 
 model Project {
-  id        Int       @id @default(autoincrement())
+  id        Int           @id @default(autoincrement())
   name      String
-  gitUrl    String    @unique
+  gitUrl    String        @unique
   language  String
-  status    String    @default("Analyzing") // "Analyzing" | "Completed" | "Failed"
-  user      User      @relation(fields: [userId], references: [id])
+  status    String        @default("Analyzing")
   userId    Int
-  issues    Issue[]
+  createdAt DateTime      @default(now())
   fileAsts  FileAst[]
+  issues    Issue[]
+  user      User          @relation(fields: [userId], references: [id])
   files     ProjectFile[]
-  createdAt DateTime  @default(now())
 }
 
 model Issue {
-  id               Int                      @id @default(autoincrement())
-  project          Project                  @relation(fields: [projectId], references: [id])
-  projectId        Int
-  filePath         String
-  functionName     String?
-  className        String?
-  issueType        String                   // e.g., "HighComplexity", "DuplicateCode", "LongMethod", "GodClass"
-  severity         String                   @default("Medium") // "Low", "Medium", "High", "Critical"
-  confidence       Int                      @default(75) // 0-100
-  description      String?
-  recommendation   String?
-  lineStart        Int?
-  lineEnd          Int?
-  metadata         Json?                    // Store details like complexity score, metrics
-  codeBlock        String
-  status           String                   @default("Pending") // "Pending", "Generating", "Resolved"
-  duplicateGroupId String?                  // For linking duplicate code issues
+  id                     Int                     @id @default(autoincrement())
+  projectId              Int
+  filePath               String
+  functionName           String?
+  issueType              String
+  metadata               Json?
+  codeBlock              String
+  status                 String                  @default("Pending")
+  createdAt              DateTime                @default(now())
+  className              String?
+  confidence             Int                     @default(75)
+  description            String?
+  duplicateGroupId       String?
+  lineEnd                Int?
+  lineStart              Int?
+  recommendation         String?
+  severity               String                  @default("Medium")
+  project                Project                 @relation(fields: [projectId], references: [id])
   refactoringSuggestions RefactoringSuggestion[]
-  createdAt        DateTime                 @default(now())
-  
+
   @@index([projectId])
   @@index([issueType])
   @@index([severity])
@@ -59,45 +59,45 @@ model Issue {
 }
 
 model RefactoringSuggestion {
-  id              Int      @id @default(autoincrement())
-  issue           Issue    @relation(fields: [issueId], references: [id])
-  issueId         Int
-  originalCode    String
-  refactoredCode  String
-  explanation     String
-  confidence      Int      @default(75) // 0-100
-  changes         Json     // Array of change objects
-  status          String   @default("pending") // "pending", "accepted", "rejected"
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  
+  id             Int      @id @default(autoincrement())
+  issueId        Int
+  originalCode   String
+  refactoredCode String
+  explanation    String
+  confidence     Int      @default(75)
+  changes        Json
+  status         String   @default("pending")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  issue          Issue    @relation(fields: [issueId], references: [id])
+
   @@index([issueId])
   @@index([status])
 }
 
 model FileAst {
-  id         Int      @id @default(autoincrement())
-  project    Project  @relation(fields: [projectId], references: [id])
-  projectId  Int
-  filePath   String
-  language   String
-  astFormat  String   // e.g., "s-expression" | "ts-compiler"
-  ast        String   // large text representation
-  createdAt  DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  projectId Int
+  filePath  String
+  language  String
+  astFormat String
+  ast       String
+  createdAt DateTime @default(now())
+  project   Project  @relation(fields: [projectId], references: [id])
 
-  @@index([projectId])
   @@unique([projectId, filePath])
+  @@index([projectId])
 }
 
 model ProjectFile {
-  id         Int      @id @default(autoincrement())
-  project    Project  @relation(fields: [projectId], references: [id])
-  projectId  Int
-  filePath   String
-  ext        String
-  supported  Boolean  @default(false)
-  createdAt  DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  projectId Int
+  filePath  String
+  ext       String
+  supported Boolean  @default(false)
+  createdAt DateTime @default(now())
+  project   Project  @relation(fields: [projectId], references: [id])
 
-  @@index([projectId])
   @@unique([projectId, filePath])
+  @@index([projectId])
 }
