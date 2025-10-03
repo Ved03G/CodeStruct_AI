@@ -14,6 +14,24 @@ export class RefactoringService {
     const issue = await (this.prisma as any).issue.findUnique({ where: { id: issueId } });
     if (!issue) return { error: 'Issue not found' };
 
+    // Check if we already have a refactoring suggestion for this issue
+    const existingSuggestion = await (this.prisma as any).refactoringSuggestion.findFirst({
+      where: { issueId: issueId },
+      orderBy: { createdAt: 'desc' } // Get the most recent suggestion
+    });
+
+    if (existingSuggestion) {
+      console.log(`[Refactoring] Using existing suggestion for issue ${issueId}`);
+      return { 
+        suggestedCode: existingSuggestion.refactoredCode, 
+        refactoredCode: existingSuggestion.refactoredCode,
+        status: existingSuggestion.status,
+        isExisting: true
+      };
+    }
+
+    console.log(`[Refactoring] Generating new suggestion for issue ${issueId}`);
+
     // Construct prompt based on issue type
     const lang = this.detectLanguage(issue.filePath);
     const prompt = this.buildPrompt(issue.issueType, issue.codeBlock, issue.functionName ?? undefined, lang);
@@ -27,8 +45,32 @@ export class RefactoringService {
       return { error: 'Generated fix failed validation' };
     }
 
+    // Store the suggestion in database
+    const refactoringSuggestion = await (this.prisma as any).refactoringSuggestion.create({
+      data: {
+        issueId: issueId,
+        originalCode: issue.codeBlock,
+        refactoredCode: suggestion,
+        explanation: `AI-generated fix for ${issue.issueType}`,
+        confidence: 75,
+        changes: {
+          type: 'ai_refactoring',
+          issueType: issue.issueType,
+          timestamp: new Date().toISOString()
+        },
+        status: 'pending'
+      }
+    });
+
+    console.log(`[Refactoring] Stored suggestion ${refactoringSuggestion.id} for issue ${issueId}`);
+
     // Return both keys for compatibility with different clients
-    return { suggestedCode: suggestion, refactoredCode: suggestion };
+    return { 
+      suggestedCode: suggestion, 
+      refactoredCode: suggestion,
+      status: 'pending',
+      isExisting: false
+    };
   }
 
   async bulkGenerateFixes(issueIds: number[], projectId: number) {
@@ -152,5 +194,104 @@ export class RefactoringService {
     // Remove code fences if any
     const match = text.match(/```[a-zA-Z]*\n([\s\S]*?)```/);
     return match ? match[1].trim() : text;
+  }
+
+  async acceptRefactoringSuggestion(issueId: number) {
+    console.log(`[Refactoring] Accepting suggestion for issue ${issueId}`);
+    
+    const suggestion = await (this.prisma as any).refactoringSuggestion.findFirst({
+      where: { issueId: issueId },
+      orderBy: { createdAt: 'desc' } // Get the most recent suggestion
+    });
+
+    if (!suggestion) {
+      throw new Error('No refactoring suggestion found for this issue');
+    }
+
+    await (this.prisma as any).refactoringSuggestion.update({
+      where: { id: suggestion.id },
+      data: { status: 'accepted' }
+    });
+
+    return { success: true, status: 'accepted' };
+  }
+
+  async rejectRefactoringSuggestion(issueId: number) {
+    console.log(`[Refactoring] Rejecting suggestion for issue ${issueId}`);
+    
+    const suggestion = await (this.prisma as any).refactoringSuggestion.findFirst({
+      where: { issueId: issueId },
+      orderBy: { createdAt: 'desc' } // Get the most recent suggestion
+    });
+
+    if (!suggestion) {
+      throw new Error('No refactoring suggestion found for this issue');
+    }
+
+    await (this.prisma as any).refactoringSuggestion.update({
+      where: { id: suggestion.id },
+      data: { status: 'rejected' }
+    });
+
+    return { success: true, status: 'rejected' };
+  }
+
+  async getRefactoringSuggestion(issueId: number) {
+    console.log(`[Service] Looking for suggestion for issueId: ${issueId}`);
+    
+    const suggestion = await (this.prisma as any).refactoringSuggestion.findFirst({
+      where: { issueId: issueId },
+      orderBy: { createdAt: 'desc' }, // Get the most recent suggestion
+      include: { issue: true }
+    });
+
+    console.log(`[Service] Database query result for issueId ${issueId}:`, suggestion ? 'Found' : 'Not found');
+    
+    if (!suggestion) {
+      console.log(`[Service] No suggestion found in database for issueId: ${issueId}`);
+      return null;
+    }
+
+    console.log(`[Service] Found suggestion ${suggestion.id} for issue ${issueId}, status: ${suggestion.status}`);
+
+    return {
+      id: suggestion.id,
+      issueId: suggestion.issueId,
+      originalCode: suggestion.originalCode,
+      refactoredCode: suggestion.refactoredCode,
+      explanation: suggestion.explanation,
+      status: suggestion.status,
+      confidence: suggestion.confidence,
+      createdAt: suggestion.createdAt,
+      issue: {
+        filePath: suggestion.issue.filePath,
+        issueType: suggestion.issue.issueType,
+        lineStart: suggestion.issue.lineStart,
+        lineEnd: suggestion.issue.lineEnd
+      }
+    };
+  }
+
+  async regenerateAllSuggestions(projectId: number, forceRegenerate: boolean = false) {
+    console.log(`[Refactoring] ${forceRegenerate ? 'Force regenerating' : 'Checking'} suggestions for project ${projectId}`);
+    
+    const issues = await (this.prisma as any).issue.findMany({
+      where: { projectId: projectId }
+    });
+
+    if (forceRegenerate) {
+      // Delete all existing suggestions for this project
+      await (this.prisma as any).refactoringSuggestion.deleteMany({
+        where: {
+          issue: {
+            projectId: projectId
+          }
+        }
+      });
+      console.log(`[Refactoring] Deleted existing suggestions for project ${projectId}`);
+    }
+
+    const issueIds = issues.map((issue: any) => issue.id);
+    return await this.bulkGenerateFixes(issueIds, projectId);
   }
 }

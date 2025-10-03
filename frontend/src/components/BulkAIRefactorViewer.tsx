@@ -39,8 +39,168 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
   const [completed, setCompleted] = useState(false);
   const [selectedResult, setSelectedResult] = useState<RefactoringResult | null>(null);
   const [activeTab, setActiveTab] = useState<'progress' | 'results'>('progress');
+  const [createPR, setCreatePR] = useState(true);
+  const [prCreating, setPrCreating] = useState(false);
+  const [prResult, setPrResult] = useState<any>(null);
+  const [existingSuggestions, setExistingSuggestions] = useState<any>({});
+  const [hasCheckedExisting, setHasCheckedExisting] = useState(false);
+  const [showExistingResults, setShowExistingResults] = useState(false);
+
+  // Check for existing suggestions when component mounts
+  React.useEffect(() => {
+    console.log('BulkAIRefactorViewer mounted, checking existing suggestions...');
+    console.log('Issues to check:', issues.map(i => ({ id: i.id, type: i.issueType })));
+    checkExistingSuggestions();
+  }, []);
+
+  const checkExistingSuggestions = async () => {
+    try {
+      console.log('Checking for existing suggestions...');
+      const suggestions: any = {};
+      let hasAnySuggestions = false;
+      
+      // Reset state first
+      setShowExistingResults(false);
+      setExistingSuggestions({});
+      
+      for (const issue of issues) {
+        try {
+          console.log(`Checking suggestion for issue ${issue.id}...`);
+          const response = await api.get(`/issues/${issue.id}/ai-refactor`);
+          console.log(`Response for issue ${issue.id}:`, response.data);
+          console.log(`Response.data keys:`, Object.keys(response.data));
+          console.log(`response.data.success:`, response.data.success);
+          console.log(`response.data.hasSuggestion:`, response.data.hasSuggestion);
+          console.log(`response.data.suggestion:`, response.data.suggestion);
+          
+          if (response.data.success && response.data.hasSuggestion) {
+            suggestions[issue.id] = response.data.suggestion;
+            hasAnySuggestions = true;
+            console.log(`✅ Found suggestion for issue ${issue.id}, status: ${response.data.suggestion.status}`);
+          } else {
+            console.log(`❌ No suggestion found for issue ${issue.id}:`, response.data);
+          }
+        } catch (error: any) {
+          console.log(`❌ Error getting suggestion for issue ${issue.id}:`, {
+            message: error.message,
+            status: error.response?.status,
+            data: error.response?.data,
+            url: error.config?.url
+          });
+        }
+      }
+      
+      console.log(`Total existing suggestions found: ${Object.keys(suggestions).length}, hasAnySuggestions: ${hasAnySuggestions}`);
+      setExistingSuggestions(suggestions);
+      setHasCheckedExisting(true);
+      
+      if (hasAnySuggestions && Object.keys(suggestions).length > 0) {
+        console.log(`✅ Setting showExistingResults to true for ${Object.keys(suggestions).length} issues`);
+        setShowExistingResults(true);
+        loadExistingResults(suggestions);
+      } else {
+        console.log('❌ No existing suggestions found, staying in ready state');
+        setShowExistingResults(false);
+      }
+    } catch (error) {
+      console.error('Error checking existing suggestions:', error);
+      setHasCheckedExisting(true);
+    }
+  };
+
+  const loadExistingResults = (suggestions: any) => {
+    const updatedResults = results.map(result => {
+      const suggestion = suggestions[result.issueId];
+      if (suggestion) {
+        return {
+          ...result,
+          success: true,
+          status: 'completed' as const,
+          suggestion: {
+            refactoredCode: suggestion.refactoredCode,
+            originalCode: suggestion.originalCode,
+            explanation: suggestion.explanation
+          },
+          accepted: suggestion.status === 'accepted',
+          rejected: suggestion.status === 'rejected'
+        };
+      }
+      return result;
+    });
+    
+    setResults(updatedResults);
+    setCompleted(true);
+    setActiveTab('results');
+  };
+
+  const regenerateAllSuggestions = async (forceRegenerate: boolean = false) => {
+    try {
+      console.log(`${forceRegenerate ? 'Force regenerating' : 'Generating missing'} suggestions...`);
+      
+      // Reset states and show progress UI
+      setProcessing(true);
+      setCompleted(false);
+      setShowExistingResults(false);
+      setActiveTab('progress');
+      
+      // Initialize results for progress tracking
+      const initialResults = issues.map(issue => ({
+        issueId: issue.id,
+        issueType: issue.issueType,
+        success: false,
+        status: 'pending' as const
+      }));
+      setResults(initialResults);
+      
+      // Call the bulk regeneration endpoint
+      const response = await api.post('/issues/bulk/regenerate-all', {
+        projectId: projectId,
+        forceRegenerate: forceRegenerate
+      });
+      
+      if (response.data.success) {
+        console.log('Regeneration completed:', response.data.summary);
+        
+        // Mark all as completed
+        setResults(prev => prev.map(r => ({
+          ...r,
+          success: true,
+          status: 'completed' as const
+        })));
+        
+        setCompleted(true);
+        setProcessing(false);
+        
+        // Switch to results tab after completion
+        setTimeout(() => {
+          setActiveTab('results');
+        }, 1000);
+        
+        // Refresh existing suggestions to load the new data
+        await checkExistingSuggestions();
+      } else {
+        throw new Error('Regeneration failed');
+      }
+    } catch (error) {
+      console.error('Error regenerating suggestions:', error);
+      setProcessing(false);
+      setCompleted(false);
+      
+      // Mark all as failed
+      setResults(prev => prev.map(r => ({
+        ...r,
+        success: false,
+        status: 'failed' as const
+      })));
+    }
+  };
 
   const processAllIssues = async () => {
+    if (showExistingResults) {
+      // If we have existing results, just use those
+      return;
+    }
+    
     setProcessing(true);
     setCurrentProcessing(0);
 
@@ -127,13 +287,36 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       !r.rejected
     );
     
-    for (const result of availableForAcceptance) {
-      await acceptSuggestion(result.issueId);
-      // Small delay between accepts
-      await new Promise(resolve => setTimeout(resolve, 200));
+    if (availableForAcceptance.length === 0) return;
+
+    try {
+      setPrCreating(true);
+      
+      // Accept all and optionally create PR
+      const response = await api.post('/issues/bulk/accept-all', {
+        projectId: projectId,
+        acceptedIssueIds: availableForAcceptance.map(r => r.issueId),
+        createPR: createPR
+      });
+
+      if (response.data.pullRequest) {
+        setPrResult(response.data.pullRequest);
+      }
+
+      // Update local state to mark as accepted
+      setResults(prev => prev.map(r => 
+        availableForAcceptance.find(a => a.issueId === r.issueId)
+          ? { ...r, accepted: true }
+          : r
+      ));
+
+      if (onComplete) onComplete();
+    } catch (error: any) {
+      console.error('Failed to accept suggestions:', error);
+      alert(`Failed to accept suggestions: ${error.response?.data?.message || error.message}`);
+    } finally {
+      setPrCreating(false);
     }
-    
-    if (onComplete) onComplete();
   };
 
   const renderDiff = (result: RefactoringResult) => {
@@ -290,7 +473,76 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
         <div className="flex-1 overflow-y-auto p-6">
           {activeTab === 'progress' && (
             <div className="space-y-4">
-              {!processing && !completed && (
+              {!hasCheckedExisting && (
+                <div className="text-center py-12">
+                  <div className="text-4xl mb-4">🔍</div>
+                  <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                    Checking for Existing Suggestions...
+                  </h3>
+                  <div className="animate-spin w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full mx-auto"></div>
+                </div>
+              )}
+
+              {hasCheckedExisting && showExistingResults && !processing && (
+                <div className="text-center py-12">
+                  <div className="text-6xl mb-4">✨</div>
+                  <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                    Found Existing AI Suggestions!
+                  </h3>
+                  <p className="text-slate-600 dark:text-slate-400 mb-6">
+                    Found {Object.keys(existingSuggestions).length} existing suggestion{Object.keys(existingSuggestions).length !== 1 ? 's' : ''}. Review them in the Results tab.
+                  </p>
+                  <div className="flex gap-3 justify-center">
+                    <button
+                      onClick={() => regenerateAllSuggestions(true)}
+                      className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2"
+                      title="Delete all existing suggestions and generate new ones for all issues. This will overwrite everything."
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      Regenerate All
+                    </button>
+                    <button
+                      onClick={() => regenerateAllSuggestions(false)}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2"
+                      title="Only generate suggestions for issues that don't have any existing suggestions. Keeps existing suggestions unchanged."
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                      </svg>
+                      Add Missing Only
+                    </button>
+                  </div>
+                  
+                  {/* Button Explanations */}
+                  <div className="mt-4 space-y-2 text-sm text-slate-600 dark:text-slate-400">
+                    <div className="flex items-start gap-2">
+                      <span className="text-orange-600 font-medium">🔄 Regenerate All:</span>
+                      <span>Replaces all existing suggestions with new ones</span>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <span className="text-blue-600 font-medium">➕ Add Missing Only:</span>
+                      <span>Keeps existing suggestions, only generates for issues without suggestions</span>
+                    </div>
+                  </div>
+                  
+                  {/* PR Status Information */}
+                  <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <h4 className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">
+                      📝 About Pull Requests
+                    </h4>
+                    <p className="text-sm text-blue-800 dark:text-blue-200 mb-2">
+                      After regenerating suggestions, you'll need to accept them and create a new Pull Request.
+                    </p>
+                    <p className="text-xs text-blue-700 dark:text-blue-300">
+                      Previous PRs remain unchanged. New suggestions require new PRs to be created.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {hasCheckedExisting && !showExistingResults && !processing && !completed && (
                 <div className="text-center py-12">
                   <div className="text-6xl mb-4">🤖</div>
                   <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
@@ -400,16 +652,48 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
 
               {/* Accept All Button */}
               {availableForAcceptance.length > 0 && (
-                <div className="flex justify-center">
-                  <button
-                    onClick={acceptAllSuggestions}
-                    className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
-                    Accept All Available ({availableForAcceptance.length})
-                  </button>
+                <div className="space-y-4">
+                  {/* PR Creation Option */}
+                  <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-4 border border-blue-200 dark:border-blue-800">
+                    <label className="flex items-center gap-3">
+                      <input
+                        type="checkbox"
+                        checked={createPR}
+                        onChange={(e) => setCreatePR(e.target.checked)}
+                        className="w-4 h-4 text-blue-600 bg-white border-blue-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 focus:ring-2 dark:bg-gray-700 dark:border-blue-600"
+                      />
+                      <div>
+                        <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                          🚀 Create Pull Request in GitHub
+                        </span>
+                        <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                          Automatically create a PR with all accepted refactorings in your original repository
+                        </p>
+                      </div>
+                    </label>
+                  </div>
+
+                  <div className="flex justify-center">
+                    <button
+                      onClick={acceptAllSuggestions}
+                      disabled={prCreating}
+                      className="bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white px-6 py-3 rounded-lg font-medium flex items-center gap-2"
+                    >
+                      {prCreating ? (
+                        <>
+                          <div className="animate-spin rounded-full h-5 w-5 border-2 border-white border-t-transparent"></div>
+                          {createPR ? 'Creating Pull Request...' : 'Accepting Changes...'}
+                        </>
+                      ) : (
+                        <>
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                          </svg>
+                          Accept All & {createPR ? 'Create PR' : 'Apply Changes'} ({availableForAcceptance.length})
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -480,6 +764,48 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                   </div>
                 ))}
               </div>
+
+              {/* PR Success Result */}
+              {prResult && (
+                <div className="mt-6 p-6 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                  <div className="flex items-start gap-4">
+                    <div className="w-12 h-12 bg-green-500 rounded-full flex items-center justify-center text-white text-xl font-bold">
+                      🎉
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="text-lg font-semibold text-green-800 dark:text-green-200 mb-2">
+                        Pull Request Created Successfully!
+                      </h4>
+                      <p className="text-green-700 dark:text-green-300 mb-4">
+                        Your refactored code has been pushed to your GitHub repository as <strong>PR #{prResult.number}</strong>
+                      </p>
+                      
+                      <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+                        <div className="bg-green-100 dark:bg-green-800/30 rounded p-3">
+                          <div className="font-medium text-green-800 dark:text-green-200">Files Modified</div>
+                          <div className="text-green-700 dark:text-green-300">{prResult.filesModified || 'Multiple'}</div>
+                        </div>
+                        <div className="bg-green-100 dark:bg-green-800/30 rounded p-3">
+                          <div className="font-medium text-green-800 dark:text-green-200">Branch Created</div>
+                          <div className="text-green-700 dark:text-green-300 font-mono text-xs">{prResult.branch}</div>
+                        </div>
+                      </div>
+
+                      <a
+                        href={prResult.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium transition-colors"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                        </svg>
+                        View Pull Request in GitHub
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
