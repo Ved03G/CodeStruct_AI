@@ -109,10 +109,11 @@ export class RefactoringController {
   @Post(':id/ai-refactor/accept')
   async acceptRefactoring(@Param('id') id: string) {
     try {
-      await this.aiRefactoringService.acceptSuggestion(Number(id));
+      const result = await this.refactoringService.acceptRefactoringSuggestion(Number(id));
       return {
         success: true,
         message: 'Refactoring suggestion accepted',
+        status: result.status
       };
     } catch (error: any) {
       throw new HttpException(
@@ -131,16 +132,47 @@ export class RefactoringController {
   @Post(':id/ai-refactor/reject')
   async rejectRefactoring(@Param('id') id: string) {
     try {
-      await this.aiRefactoringService.rejectSuggestion(Number(id));
+      const result = await this.refactoringService.rejectRefactoringSuggestion(Number(id));
       return {
         success: true,
         message: 'Refactoring suggestion rejected',
+        status: result.status
       };
     } catch (error: any) {
       throw new HttpException(
         {
           success: false,
           message: error.message || 'Failed to reject refactoring suggestion',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Get refactoring suggestion for an issue
+   */
+  @Get(':id/ai-refactor')
+  async getRefactoringSuggestion(@Param('id') id: string) {
+    try {
+      const suggestion = await this.refactoringService.getRefactoringSuggestion(Number(id));
+      if (!suggestion) {
+        return {
+          success: false,
+          message: 'No refactoring suggestion found for this issue',
+          hasSuggestion: false
+        };
+      }
+      return {
+        success: true,
+        hasSuggestion: true,
+        suggestion
+      };
+    } catch (error: any) {
+      throw new HttpException(
+        {
+          success: false,
+          message: error.message || 'Failed to get refactoring suggestion',
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
@@ -207,29 +239,22 @@ export class RefactoringController {
   }
 
   private async getAcceptedRefactoringsData(issueIds: number[]) {
-    // Get AI refactoring data for accepted issues
+    // Get refactoring data from persistent storage for accepted issues
     const refactorings = [];
     
     for (const issueId of issueIds) {
       try {
-        const suggestion = await this.aiRefactoringService.getRefactoringSuggestion(issueId);
+        const suggestion = await this.refactoringService.getRefactoringSuggestion(issueId);
         if (suggestion) {
-          // Get issue details for file path and issue type
-          const issue = await this.refactoringService['prisma'].issue.findUnique({
-            where: { id: issueId }
+          refactorings.push({
+            issueId: issueId,
+            filePath: suggestion.issue.filePath,
+            originalCode: suggestion.originalCode,
+            refactoredCode: suggestion.refactoredCode,
+            issueType: suggestion.issue.issueType,
+            lineStart: suggestion.issue.lineStart || 1,
+            lineEnd: suggestion.issue.lineEnd || 1,
           });
-          
-          if (issue) {
-            refactorings.push({
-              issueId: issueId,
-              filePath: issue.filePath,
-              originalCode: suggestion.originalCode,
-              refactoredCode: suggestion.refactoredCode,
-              issueType: issue.issueType,
-              lineStart: issue.lineStart || 1,
-              lineEnd: issue.lineEnd || 1,
-            });
-          }
         }
       } catch (error) {
         console.error(`Failed to get refactoring data for issue ${issueId}:`, error);
@@ -241,14 +266,49 @@ export class RefactoringController {
   }
 
   private async markRefactoringsAsAccepted(issueIds: number[]) {
-    // Mark AI refactoring suggestions as accepted
+    // Mark refactoring suggestions as accepted in persistent storage
     for (const issueId of issueIds) {
       try {
-        await this.aiRefactoringService.acceptSuggestion(issueId);
+        await this.refactoringService.acceptRefactoringSuggestion(issueId);
       } catch (error) {
         console.error(`Failed to mark issue ${issueId} as accepted:`, error);
         // Continue with other issues
       }
+    }
+  }
+
+  /**
+   * Regenerate all refactoring suggestions for a project
+   */
+  @Post('bulk/regenerate-all')
+  async regenerateAllSuggestions(@Body() body: { projectId: number; forceRegenerate?: boolean }) {
+    try {
+      console.log(`Regenerating suggestions for project ${body.projectId}, force: ${body.forceRegenerate}`);
+      
+      const results = await this.refactoringService.regenerateAllSuggestions(
+        body.projectId, 
+        body.forceRegenerate || false
+      );
+      
+      return {
+        success: true,
+        message: body.forceRegenerate ? 'All suggestions regenerated' : 'Missing suggestions generated',
+        results: results,
+        summary: {
+          total: results.length,
+          successful: results.filter((r: any) => r.success).length,
+          failed: results.filter((r: any) => !r.success).length,
+        }
+      };
+    } catch (error: any) {
+      console.error('Regenerate all suggestions error:', error);
+      throw new HttpException(
+        {
+          success: false,
+          message: error.message || 'Failed to regenerate suggestions',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
     }
   }
 }

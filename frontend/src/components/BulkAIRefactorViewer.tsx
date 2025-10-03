@@ -42,8 +42,97 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
   const [createPR, setCreatePR] = useState(true);
   const [prCreating, setPrCreating] = useState(false);
   const [prResult, setPrResult] = useState<any>(null);
+  const [existingSuggestions, setExistingSuggestions] = useState<any>({});
+  const [hasCheckedExisting, setHasCheckedExisting] = useState(false);
+  const [showExistingResults, setShowExistingResults] = useState(false);
+
+  // Check for existing suggestions when component mounts
+  React.useEffect(() => {
+    checkExistingSuggestions();
+  }, []);
+
+  const checkExistingSuggestions = async () => {
+    try {
+      console.log('Checking for existing suggestions...');
+      const suggestions: any = {};
+      let hasAnySuggestions = false;
+      
+      for (const issue of issues) {
+        try {
+          const response = await api.get(`/issues/${issue.id}/ai-refactor`);
+          if (response.data.success && response.data.hasSuggestion) {
+            suggestions[issue.id] = response.data.suggestion;
+            hasAnySuggestions = true;
+          }
+        } catch (error) {
+          console.log(`No existing suggestion for issue ${issue.id}`);
+        }
+      }
+      
+      setExistingSuggestions(suggestions);
+      setHasCheckedExisting(true);
+      
+      if (hasAnySuggestions) {
+        console.log(`Found existing suggestions for ${Object.keys(suggestions).length} issues`);
+        setShowExistingResults(true);
+        loadExistingResults(suggestions);
+      }
+    } catch (error) {
+      console.error('Error checking existing suggestions:', error);
+      setHasCheckedExisting(true);
+    }
+  };
+
+  const loadExistingResults = (suggestions: any) => {
+    const updatedResults = results.map(result => {
+      const suggestion = suggestions[result.issueId];
+      if (suggestion) {
+        return {
+          ...result,
+          success: true,
+          status: 'completed' as const,
+          suggestion: {
+            refactoredCode: suggestion.refactoredCode,
+            originalCode: suggestion.originalCode,
+            explanation: suggestion.explanation
+          },
+          accepted: suggestion.status === 'accepted',
+          rejected: suggestion.status === 'rejected'
+        };
+      }
+      return result;
+    });
+    
+    setResults(updatedResults);
+    setCompleted(true);
+    setActiveTab('results');
+  };
+
+  const regenerateAllSuggestions = async (forceRegenerate: boolean = false) => {
+    try {
+      console.log(`${forceRegenerate ? 'Force regenerating' : 'Generating missing'} suggestions...`);
+      
+      const response = await api.post('/issues/bulk/regenerate-all', {
+        projectId: projectId,
+        forceRegenerate: forceRegenerate
+      });
+      
+      if (response.data.success) {
+        console.log('Regeneration completed:', response.data.summary);
+        // Refresh existing suggestions
+        await checkExistingSuggestions();
+      }
+    } catch (error) {
+      console.error('Error regenerating suggestions:', error);
+    }
+  };
 
   const processAllIssues = async () => {
+    if (showExistingResults) {
+      // If we have existing results, just use those
+      return;
+    }
+    
     setProcessing(true);
     setCurrentProcessing(0);
 
@@ -316,7 +405,49 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
         <div className="flex-1 overflow-y-auto p-6">
           {activeTab === 'progress' && (
             <div className="space-y-4">
-              {!processing && !completed && (
+              {!hasCheckedExisting && (
+                <div className="text-center py-12">
+                  <div className="text-4xl mb-4">🔍</div>
+                  <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                    Checking for Existing Suggestions...
+                  </h3>
+                  <div className="animate-spin w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full mx-auto"></div>
+                </div>
+              )}
+
+              {hasCheckedExisting && showExistingResults && !processing && (
+                <div className="text-center py-12">
+                  <div className="text-6xl mb-4">✨</div>
+                  <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                    Found Existing AI Suggestions!
+                  </h3>
+                  <p className="text-slate-600 dark:text-slate-400 mb-6">
+                    Found {Object.keys(existingSuggestions).length} existing suggestions. Review them in the Results tab.
+                  </p>
+                  <div className="flex gap-3 justify-center">
+                    <button
+                      onClick={() => regenerateAllSuggestions(true)}
+                      className="bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                      </svg>
+                      Regenerate All
+                    </button>
+                    <button
+                      onClick={() => regenerateAllSuggestions(false)}
+                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                      </svg>
+                      Add Missing Only
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {hasCheckedExisting && !showExistingResults && !processing && !completed && (
                 <div className="text-center py-12">
                   <div className="text-6xl mb-4">🤖</div>
                   <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
