@@ -1,11 +1,46 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: light dark;
-}
+@layer base {
+  :root {
+    color-scheme: light dark;
+    --gradient-primary: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+    --gradient-accent: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%);
+    --gradient-success: linear-gradient(135deg, #22c55e 0%, #16a34a 100%);
+  }
 
-body {
-  @apply bg-gray-50 text-gray-900 dark:bg-slate-900 dark:text-slate-100;
+  * {
+    @apply border-neutral-200 dark:border-neutral-800;
+  }
+
+  body {
+    @apply bg-gradient-to-br from-neutral-50 via-primary-50/20 to-neutral-50;
+    @apply dark:from-neutral-950 dark:via-primary-950/20 dark:to-neutral-950;
+    @apply text-neutral-900 dark:text-neutral-100;
+    @apply font-sans antialiased;
+    @apply transition-colors duration-300;
+  }
+
+  /* Smooth scrolling */
+  html {
+    @apply scroll-smooth;
+  }
+
+  /* Code blocks */
+  code {
+    @apply font-mono text-sm bg-neutral-100 dark:bg-neutral-800 px-1.5 py-0.5 rounded;
+  }
+
+  pre code {
+    @apply bg-transparent p-0;
+  }
+
+  /* Selection */
+  ::selection {
+    @apply bg-primary-500/30 text-primary-900;
+  }
 }

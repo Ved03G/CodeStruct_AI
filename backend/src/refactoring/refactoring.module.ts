@@ -11,6 +11,6 @@ import { GitHubModule } from '../github/github.module';
   imports: [PrismaModule, ValidationModule, AuthModule, GitHubModule],
   providers: [RefactoringService, AIRefactoringService],
   controllers: [RefactoringController],
-  exports: [AIRefactoringService],
+  exports: [RefactoringService, AIRefactoringService],
 })
 export class RefactoringModule { }
