@@ -7,9 +7,12 @@ import { AnalysisHelperService } from './analysis-helper.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ParserService } from '../parser/parser.service';
 import { AuthModule } from '../auth/auth.module';
+import { RefactoringModule } from '../refactoring/refactoring.module';
+import { GitHubModule } from '../github/github.module';
+import { ValidationModule } from '../validation/validation.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule],
+  imports: [PrismaModule, AuthModule, RefactoringModule, GitHubModule, ValidationModule],
   providers: [
     AnalysisService,
     EnhancedAnalysisService,

@@ -23,6 +23,7 @@ export interface ProjectData {
     gitUrl: string;
     language: string;
     status: 'Analyzing' | 'Completed' | 'Failed';
+    analysisStage?: 'cloning' | 'detecting' | 'parsing' | 'analyzing' | 'duplicates' | 'refactoring' | 'pr' | 'completed';
     issues: EnhancedIssue[];
     files: string[];
     astFiles: string[];

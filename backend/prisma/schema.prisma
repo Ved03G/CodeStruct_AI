@@ -18,17 +18,18 @@ model User {
 }
 
 model Project {
-  id        Int           @id @default(autoincrement())
-  name      String
-  gitUrl    String        @unique
-  language  String
-  status    String        @default("Analyzing")
-  userId    Int
-  createdAt DateTime      @default(now())
-  fileAsts  FileAst[]
-  issues    Issue[]
-  user      User          @relation(fields: [userId], references: [id])
-  files     ProjectFile[]
+  id             Int           @id @default(autoincrement())
+  name           String
+  gitUrl         String        @unique
+  language       String
+  status         String        @default("Analyzing")
+  analysisStage  String?       @default("cloning")
+  userId         Int
+  createdAt      DateTime      @default(now())
+  fileAsts       FileAst[]
+  issues         Issue[]
+  user           User          @relation(fields: [userId], references: [id])
+  files          ProjectFile[]
 }
 
 model Issue {
@@ -69,7 +70,7 @@ model RefactoringSuggestion {
   status         String   @default("pending")
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
-  issue          Issue    @relation(fields: [issueId], references: [id])
+  issue          Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
   @@index([issueId])
   @@index([status])

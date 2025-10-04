@@ -3,6 +3,8 @@ import { ParserService } from '../parser/parser.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnhancedAnalysisService } from './enhanced-analysis.service';
 import { DuplicationDetectionService } from './duplication-detection.service';
+import { RefactoringService } from '../refactoring/refactoring.service';
+import { GitHubPRService } from '../github/github-pr.service';
 import simpleGit from 'simple-git';
 import { tmpdir } from 'os';
 import { mkdtemp, readdir, readFile } from 'fs/promises';
@@ -23,6 +25,8 @@ export class AnalysisService {
     private readonly parserService: ParserService,
     private readonly enhancedAnalysisService: EnhancedAnalysisService,
     private readonly duplicationDetectionService: DuplicationDetectionService,
+    private readonly refactoringService: RefactoringService,
+    private readonly githubPRService: GitHubPRService,
   ) {
     const th = Number(process.env.ANALYSIS_COMPLEXITY_THRESHOLD);
     if (!Number.isNaN(th) && th > 0) this.complexityThreshold = th;
@@ -77,8 +81,8 @@ export class AnalysisService {
     }
 
     // Async fire-and-forget analysis (no queue for demo)
-    this.dlog('queue analyzeRepo', { effectiveUrl, language: language || 'auto-detect', projectId: project.id });
-    this.analyzeRepo(effectiveUrl, language || 'auto-detect', project.id).catch((err) => {
+    this.dlog('queue analyzeRepo', { effectiveUrl, language: language || 'auto-detect', projectId: project.id, userId });
+    this.analyzeRepo(effectiveUrl, language || 'auto-detect', project.id, userId).catch((err) => {
       // eslint-disable-next-line no-console
       console.error('Analysis failed', err);
     });
@@ -147,15 +151,19 @@ export class AnalysisService {
     }
   }
 
-  private async analyzeRepo(gitUrl: string, language: string, projectId: number) {
-    this.dlog('analyzeRepo start', { gitUrl, language, projectId });
+  private async analyzeRepo(gitUrl: string, language: string, projectId: number, userId?: number) {
+    this.dlog('analyzeRepo start', { gitUrl, language, projectId, userId });
     let dir: string | undefined;
     try {
+      // Stage 1: Cloning
+      await this.updateAnalysisStage(projectId, 'cloning');
       dir = await mkdtemp(join(tmpdir(), 'codestruct-'));
       const git = simpleGit();
       await git.clone(gitUrl, dir);
       this.dlog('cloned into', { dir });
 
+      // Stage 2: Language Detection
+      await this.updateAnalysisStage(projectId, 'detecting');
       // Auto-detect language if needed
       let detectedLanguage = language;
       if (language === 'auto-detect') {
@@ -173,25 +181,39 @@ export class AnalysisService {
         }
       }
 
-      // Reset existing issues for re-run scenarios
+      // Reset existing issues for re-run scenarios (cascade deletes refactoring suggestions)
       await (this.prisma as any).issue.deleteMany({ where: { projectId } });
       await (this.prisma as any).fileAst?.deleteMany?.({ where: { projectId } }).catch(() => { });
 
       const files = await this.collectFiles(dir);
       this.dlog('files collected', { count: files.length });
+      // Stage 3: Parsing Files
+      await this.updateAnalysisStage(projectId, 'parsing');
       // Parse all files and persist ASTs using ParserService
-      const asts = await this.parserService.parseRepo(dir, detectedLanguage);
-      this.dlog('ASTs parsed', { count: Object.keys(asts).length });
+      let asts: any = {};
+      try {
+        asts = await this.parserService.parseRepo(dir, detectedLanguage);
+        this.dlog('ASTs parsed', { count: Object.keys(asts).length });
+      } catch (parseError: any) {
+        this.dlog('parseRepo failed, continuing with empty ASTs', { error: parseError?.message });
+        // Continue analysis even if parsing fails
+      }
+
       for (const [relPath, astObj] of Object.entries(asts)) {
-        await (this.prisma as any).fileAst.create({
-          data: {
-            projectId,
-            filePath: relPath,
-            language: astObj.language,
-            astFormat: astObj.format,
-            ast: String(astObj.ast).slice(0, 500000),
-          },
-        }).catch(() => { });
+        try {
+          await (this.prisma as any).fileAst.create({
+            data: {
+              projectId,
+              filePath: relPath,
+              language: (astObj as any).language,
+              astFormat: (astObj as any).format,
+              ast: String((astObj as any).ast).slice(0, 500000),
+            },
+          });
+        } catch (astError: any) {
+          this.dlog('failed to store AST for file', { relPath, error: astError?.message });
+          // Continue with other files
+        }
       }
       this.dlog('total files found', { count: files.length });
       // Store file inventory for the project (use repo-relative paths)
@@ -205,6 +227,8 @@ export class AnalysisService {
         if (batch.length) await (this.prisma as any).projectFile?.createMany?.({ data: batch, skipDuplicates: true });
       } catch { }
 
+      // Stage 4: Analyzing Code Smells
+      await this.updateAnalysisStage(projectId, 'analyzing');
       // Enhanced analysis using new services
       const codeBlocks: Array<{ code: string; filePath: string; startIndex: number; endIndex: number; ast?: any }> = [];
       let created = 0;
@@ -212,71 +236,114 @@ export class AnalysisService {
       let filesAnalyzed = 0;
 
       for (const file of files) {
-        const displayPath = relative(dir!, file).replace(/\\/g, '/');
-        const code = await readFile(file, 'utf8');
-        const ext = extname(file).toLowerCase();
-        filesVisited++;
-        const supported = this.supports(ext, detectedLanguage);
-
-        if (!supported) {
-          this.dlog('skip unsupported', { displayPath, ext, language: detectedLanguage });
-          continue;
-        }
-
-        this.dlog('analyzing file', { displayPath, ext });
-
-        let astSucceeded = false;
-        let ast: any = null;
-
-        // Try Tree-sitter parsing first
         try {
-          const parsed = this.parserService.parseWithTreeSitter(code, ext);
-          if (parsed) {
-            this.dlog('treesitter parsed', { displayPath, langKey: parsed.langKey });
-            ast = parsed.tree;
+          const displayPath = relative(dir!, file).replace(/\\/g, '/');
+          const code = await readFile(file, 'utf8');
+          const ext = extname(file).toLowerCase();
+          filesVisited++;
+          const supported = this.supports(ext, detectedLanguage);
 
-            // Use enhanced analysis service
-            const issues = await this.enhancedAnalysisService.analyzeCodeSmells(
-              ast,
-              code,
-              displayPath,
-              parsed.langKey,
-              projectId
-            );
+          if (!supported) {
+            this.dlog('skip unsupported', { displayPath, ext, language: detectedLanguage });
+            continue;
+          }
 
-            created += issues.length;
-            astSucceeded = true;
-            filesAnalyzed++;
+          this.dlog('analyzing file', { displayPath, ext });
 
-            // Add to code blocks for duplicate detection (with size limits)
-            if (code.length <= 50000) { // Skip very large files for duplicate detection
+          let astSucceeded = false;
+          let ast: any = null;
+
+          // Try Tree-sitter parsing first
+          try {
+            const parsed = this.parserService.parseWithTreeSitter(code, ext);
+            if (parsed) {
+              this.dlog('treesitter parsed', { displayPath, langKey: parsed.langKey });
+              ast = parsed.tree;
+
+              // Use enhanced analysis service
+              const issues = await this.enhancedAnalysisService.analyzeCodeSmells(
+                ast,
+                code,
+                displayPath,
+                parsed.langKey,
+                projectId
+              );
+
+              created += issues.length;
+              astSucceeded = true;
+              filesAnalyzed++;
+
+              // Add to code blocks for duplicate detection (with size limits)
+              if (code.length <= 50000) { // Skip very large files for duplicate detection
+                codeBlocks.push({
+                  code: code.slice(0, 10000), // Limit code size for duplicate detection
+                  filePath: displayPath,
+                  startIndex: 0,
+                  endIndex: Math.min(code.length, 10000),
+                  ast
+                });
+              }
+            }
+          } catch (error: any) {
+            this.dlog('treesitter parsing failed', { displayPath, error: error?.message || 'Unknown error' });
+          }
+
+          // Fallback to JSON AST if available
+          const astObj = (asts as any)[displayPath];
+          if (!astSucceeded && astObj?.ast && (astObj.format === 'tree-sitter-json' || astObj.format === 'ts-compiler-json')) {
+            this.dlog('using JSON AST fallback', { displayPath, format: astObj.format });
+            try {
+              const jsonAst = JSON.parse(astObj.ast);
+
+              // Basic complexity analysis for fallback
+              const funcNodes = this.findFunctionsJson(jsonAst, astObj.format);
+              for (const fn of funcNodes) {
+                const { start, end } = this.getRangeFromJsonNode(fn, astObj.format);
+                const text = code.slice(start, end);
+                const complexity = this.calculateComplexityJson(fn, astObj.format, code);
+                const fnName = this.extractFunctionNameFromText(text, detectedLanguage);
+
+                if (complexity > this.complexityThreshold) {
+                  await (this.prisma as any).issue.create({
+                    data: {
+                      projectId,
+                      filePath: displayPath,
+                      functionName: fnName,
+                      issueType: 'HighComplexity',
+                      severity: complexity > 15 ? 'High' : complexity > 10 ? 'Medium' : 'Low',
+                      confidence: 80,
+                      description: `Function '${fnName}' has high cyclomatic complexity (${complexity})`,
+                      recommendation: 'Consider breaking this function into smaller, more focused functions.',
+                      metadata: { complexity },
+                      codeBlock: text,
+                    },
+                  });
+                  created++;
+                }
+              }
+
+              astSucceeded = true;
+              filesAnalyzed++;
+
               codeBlocks.push({
-                code: code.slice(0, 10000), // Limit code size for duplicate detection
+                code,
                 filePath: displayPath,
                 startIndex: 0,
-                endIndex: Math.min(code.length, 10000),
-                ast
+                endIndex: code.length
               });
+            } catch (error: any) {
+              this.dlog('JSON AST parsing failed', { displayPath, error: error?.message || 'Unknown error' });
             }
           }
-        } catch (error: any) {
-          this.dlog('treesitter parsing failed', { displayPath, error: error?.message || 'Unknown error' });
-        }
 
-        // Fallback to JSON AST if available
-        const astObj = (asts as any)[displayPath];
-        if (!astSucceeded && astObj?.ast && (astObj.format === 'tree-sitter-json' || astObj.format === 'ts-compiler-json')) {
-          this.dlog('using JSON AST fallback', { displayPath, format: astObj.format });
-          try {
-            const jsonAst = JSON.parse(astObj.ast);
+          // Final fallback to text-based analysis
+          if (!astSucceeded) {
+            this.dlog('falling back to text extraction', { displayPath });
+            const blocks = this.extractBlocksFallback(code, detectedLanguage);
 
-            // Basic complexity analysis for fallback
-            const funcNodes = this.findFunctionsJson(jsonAst, astObj.format);
-            for (const fn of funcNodes) {
-              const { start, end } = this.getRangeFromJsonNode(fn, astObj.format);
-              const text = code.slice(start, end);
-              const complexity = this.calculateComplexityJson(fn, astObj.format, code);
-              const fnName = this.extractFunctionNameFromText(text, detectedLanguage);
+            for (const block of blocks) {
+              const complexity = this.estimateCyclomaticComplexityFromText(block.text);
+              const fnName = this.extractFunctionNameFromText(block.text, detectedLanguage);
 
               if (complexity > this.complexityThreshold) {
                 await (this.prisma as any).issue.create({
@@ -286,71 +353,36 @@ export class AnalysisService {
                     functionName: fnName,
                     issueType: 'HighComplexity',
                     severity: complexity > 15 ? 'High' : complexity > 10 ? 'Medium' : 'Low',
-                    confidence: 80,
+                    confidence: 60,
                     description: `Function '${fnName}' has high cyclomatic complexity (${complexity})`,
                     recommendation: 'Consider breaking this function into smaller, more focused functions.',
                     metadata: { complexity },
-                    codeBlock: text,
+                    codeBlock: block.text,
                   },
                 });
                 created++;
               }
             }
 
-            astSucceeded = true;
-            filesAnalyzed++;
-
-            codeBlocks.push({
-              code,
-              filePath: displayPath,
-              startIndex: 0,
-              endIndex: code.length
-            });
-          } catch (error: any) {
-            this.dlog('JSON AST parsing failed', { displayPath, error: error?.message || 'Unknown error' });
-          }
-        }
-
-        // Final fallback to text-based analysis
-        if (!astSucceeded) {
-          this.dlog('falling back to text extraction', { displayPath });
-          const blocks = this.extractBlocksFallback(code, detectedLanguage);
-
-          for (const block of blocks) {
-            const complexity = this.estimateCyclomaticComplexityFromText(block.text);
-            const fnName = this.extractFunctionNameFromText(block.text, detectedLanguage);
-
-            if (complexity > this.complexityThreshold) {
-              await (this.prisma as any).issue.create({
-                data: {
-                  projectId,
-                  filePath: displayPath,
-                  functionName: fnName,
-                  issueType: 'HighComplexity',
-                  severity: complexity > 15 ? 'High' : complexity > 10 ? 'Medium' : 'Low',
-                  confidence: 60,
-                  description: `Function '${fnName}' has high cyclomatic complexity (${complexity})`,
-                  recommendation: 'Consider breaking this function into smaller, more focused functions.',
-                  metadata: { complexity },
-                  codeBlock: block.text,
-                },
+            // Add to code blocks for duplicate detection (with size limits)
+            if (code.length <= 50000) { // Skip very large files for duplicate detection
+              codeBlocks.push({
+                code: code.slice(0, 10000), // Limit code size for duplicate detection
+                filePath: displayPath,
+                startIndex: 0,
+                endIndex: Math.min(code.length, 10000)
               });
-              created++;
             }
           }
-
-          // Add to code blocks for duplicate detection (with size limits)
-          if (code.length <= 50000) { // Skip very large files for duplicate detection
-            codeBlocks.push({
-              code: code.slice(0, 10000), // Limit code size for duplicate detection
-              filePath: displayPath,
-              startIndex: 0,
-              endIndex: Math.min(code.length, 10000)
-            });
-          }
+        } catch (fileError: any) {
+          this.dlog('failed to analyze file', { file, error: fileError?.message });
+          filesVisited++;
+          // Continue with next file
         }
       }
 
+      // Stage 5: Duplicate Detection
+      await this.updateAnalysisStage(projectId, 'duplicates');
       // Enhanced duplicate detection with memory optimization
       this.dlog('starting enhanced duplicate detection', { codeBlockCount: codeBlocks.length });
 
@@ -426,7 +458,11 @@ export class AnalysisService {
       }
       this.dlog('analysis complete', { totalIssues: created, filesVisited, filesAnalyzed });
       // Mark project completed
-      await (this.prisma as any).project.update({ where: { id: projectId }, data: { status: 'Completed' } });
+      await (this.prisma as any).project.update({ where: { id: projectId }, data: { status: 'Completed', analysisStage: 'refactoring' } });
+
+      // Automatically generate fixes and create PR
+      this.dlog('triggering automatic refactoring and PR creation');
+      await this.autoGenerateFixesAndCreatePR(projectId, userId);
     } catch (e) {
       // Mark project failed
       try {
@@ -1168,5 +1204,142 @@ export class AnalysisService {
       filtered.push({ value, count });
     }
     return filtered;
+  }
+
+  /**
+   * Update the analysis stage for a project to show progress
+   */
+  private async updateAnalysisStage(projectId: number, stage: string) {
+    try {
+      await (this.prisma as any).project.update({
+        where: { id: projectId },
+        data: { analysisStage: stage }
+      });
+      this.dlog(`[Stage] Updated to: ${stage}`, { projectId });
+    } catch (error) {
+      this.dlog(`[Stage] Failed to update stage:`, error);
+    }
+  }
+
+  /**
+   * Automatically generate refactoring fixes and create a PR after analysis completes
+   */
+  private async autoGenerateFixesAndCreatePR(projectId: number, userId?: number) {
+    try {
+      this.dlog('[Auto-Refactor] Starting automatic refactoring for project', { projectId, userId });
+
+      // Skip if no userId (need GitHub token for PR)
+      if (!userId) {
+        this.dlog('[Auto-Refactor] Skipping - no userId provided');
+        return;
+      }
+
+      // Get user to check for GitHub token
+      const user = await (this.prisma as any).user.findUnique({ where: { id: userId } });
+      if (!user?.githubAccessToken) {
+        this.dlog('[Auto-Refactor] Skipping - user has no GitHub access token');
+        return;
+      }
+
+      // Get all issues for this project
+      const issues = await (this.prisma as any).issue.findMany({
+        where: { projectId: projectId }
+      });
+
+      if (issues.length === 0) {
+        this.dlog('[Auto-Refactor] No issues found for project');
+        return;
+      }
+
+      this.dlog('[Auto-Refactor] Found issues:', { count: issues.length });
+
+      // Extract issue IDs
+      const issueIds = issues.map((issue: any) => issue.id);
+
+      // Step 1: Generate fixes for all issues
+      this.dlog('[Auto-Refactor] Generating fixes for all issues...');
+      const fixResults = await this.refactoringService.bulkGenerateFixes(issueIds, projectId);
+
+      const successfulFixes = fixResults.filter((r: any) => r.success);
+      this.dlog('[Auto-Refactor] Fix generation completed', {
+        total: fixResults.length,
+        successful: successfulFixes.length
+      });
+
+      if (successfulFixes.length === 0) {
+        this.dlog('[Auto-Refactor] No successful fixes generated');
+        return;
+      }
+
+      // Step 2: Get refactoring data for successful fixes
+      const acceptedIssueIds = successfulFixes.map((r: any) => r.issueId);
+      const acceptedRefactorings = await this.getAcceptedRefactoringsData(acceptedIssueIds);
+
+      if (acceptedRefactorings.length === 0) {
+        this.dlog('[Auto-Refactor] No refactoring data available');
+        return;
+      }
+
+      // Step 3: Mark all as accepted
+      await this.markRefactoringsAsAccepted(acceptedIssueIds);
+      this.dlog('[Auto-Refactor] Marked refactorings as accepted');
+
+      // Step 4: Create PR
+      await this.updateAnalysisStage(projectId, 'pr');
+      this.dlog('[Auto-Refactor] Creating pull request...');
+      const prResult = await this.githubPRService.createRefactoringPR(
+        userId,
+        projectId,
+        acceptedRefactorings
+      );
+
+      await this.updateAnalysisStage(projectId, 'completed');
+      this.dlog('[Auto-Refactor] Pull request created successfully', {
+        url: prResult.pullRequest.url,
+        number: prResult.pullRequest.number,
+        filesModified: prResult.filesModified,
+        refactoringsApplied: prResult.refactoringsApplied
+      });
+
+    } catch (error: any) {
+      // Log error but don't fail the analysis
+      this.dlog('[Auto-Refactor] Error during automatic refactoring:', error?.message || 'Unknown error');
+      console.error('[Auto-Refactor] Failed to auto-generate fixes and PR:', error);
+    }
+  }
+
+  private async getAcceptedRefactoringsData(issueIds: number[]) {
+    const refactorings = [];
+
+    for (const issueId of issueIds) {
+      try {
+        const suggestion = await this.refactoringService.getRefactoringSuggestion(issueId);
+        if (suggestion) {
+          refactorings.push({
+            issueId: issueId,
+            filePath: suggestion.issue.filePath,
+            originalCode: suggestion.originalCode,
+            refactoredCode: suggestion.refactoredCode,
+            issueType: suggestion.issue.issueType,
+            lineStart: suggestion.issue.lineStart || 1,
+            lineEnd: suggestion.issue.lineEnd || 1,
+          });
+        }
+      } catch (error) {
+        this.dlog(`[Auto-Refactor] Failed to get refactoring data for issue ${issueId}:`, error);
+      }
+    }
+
+    return refactorings;
+  }
+
+  private async markRefactoringsAsAccepted(issueIds: number[]) {
+    for (const issueId of issueIds) {
+      try {
+        await this.refactoringService.acceptRefactoringSuggestion(issueId);
+      } catch (error) {
+        this.dlog(`[Auto-Refactor] Failed to mark issue ${issueId} as accepted:`, error);
+      }
+    }
   }
 }
