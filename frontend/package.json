@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-  "dev": "vite",
-  "build": "vite build",
-  "clean:src": "git rm -f --cached -r src/**/*.js src/**/*.js.map 2> NUL & del /s /q src\\*.js src\\*.js.map 2> NUL || exit 0",
+    "dev": "vite",
+    "build": "vite build",
+    "clean:src": "git rm -f --cached -r src/**/*.js src/**/*.js.map 2> NUL & del /s /q src\\*.js src\\*.js.map 2> NUL || exit 0",
     "preview": "vite preview --host",
     "lint": "eslint src --ext .ts,.tsx"
   },
@@ -16,6 +16,7 @@
     "axios": "^1.7.2",
     "gsap": "^3.13.0",
     "jsonwebtoken": "^9.0.2",
+    "lucide-react": "^0.544.0",
     "react": "^18.3.1",
     "react-diff-viewer-continued": "^4.0.2",
     "react-dom": "^18.3.1",

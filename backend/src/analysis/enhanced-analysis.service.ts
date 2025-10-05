@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ParserService } from '../parser/parser.service';
 import { AnalysisHelperService } from './analysis-helper.service';
+import { SecurityAnalysisService } from './security-analysis.service';
 
 export interface CodeSmellIssue {
     type: 'LongMethod' | 'GodClass' | 'DeepNesting' | 'LongParameterList' | 'HighComplexity' | 'CognitiveComplexity' | 'DuplicateCode' | 'MagicNumber' | 'DeadCode' | 'LargeClass' | 'FeatureEnvy' | 'DataClumps';
@@ -71,6 +72,7 @@ export class EnhancedAnalysisService {
         private readonly prisma: PrismaService,
         private readonly parserService: ParserService,
         private readonly helperService: AnalysisHelperService,
+        private readonly securityAnalysisService: SecurityAnalysisService,
     ) { }
 
     async analyzeCodeSmells(
@@ -92,7 +94,8 @@ export class EnhancedAnalysisService {
             { name: 'Enhanced Complexity', fn: () => this.detectEnhancedComplexity(ast, code, filePath, language) },
             { name: 'Magic Numbers', fn: () => this.detectMagicNumbers(ast, code, filePath, language) },
             { name: 'Dead Code', fn: () => this.detectDeadCode(ast, code, filePath, language) },
-            { name: 'Feature Envy', fn: () => this.detectFeatureEnvy(ast, code, filePath, language) }
+            { name: 'Feature Envy', fn: () => this.detectFeatureEnvy(ast, code, filePath, language) },
+            { name: 'Security Issues', fn: () => this.detectSecurityIssues(code, filePath, projectId) }
         ];
 
         for (const detection of detections) {
@@ -790,5 +793,24 @@ export class EnhancedAnalysisService {
                 codeBlock: issue.codeBlock,
             },
         });
+    }
+
+    private async detectSecurityIssues(code: string, filePath: string, projectId: number): Promise<CodeSmellIssue[]> {
+        const securityIssues = await this.securityAnalysisService.analyzeSecurityIssues(code, filePath, projectId);
+        
+        // Convert security issues to code smell issues for consistency
+        return securityIssues.map(issue => ({
+            type: issue.type as any, // Type assertion for compatibility
+            severity: issue.severity,
+            confidence: issue.confidence,
+            description: issue.description,
+            recommendation: issue.recommendation,
+            filePath: issue.filePath,
+            functionName: issue.functionName,
+            lineStart: issue.lineStart,
+            lineEnd: issue.lineEnd,
+            codeBlock: issue.codeBlock,
+            metrics: issue.metrics || {}
+        }));
     }
 }
