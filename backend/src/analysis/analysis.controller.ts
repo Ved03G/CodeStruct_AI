@@ -1,6 +1,7 @@
-import { Body, Controller, Post, Req, BadRequestException, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { Body, Controller, Post, Get, Param, Req, BadRequestException, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import { Request } from 'express';
 import { AnalysisService } from './analysis.service';
+import { SecurityAnalysisService } from './security-analysis.service';
 import { IsNotEmpty, IsString, IsOptional } from 'class-validator';
 import { AuthGuard } from '../auth/auth.guard';
 
@@ -17,7 +18,10 @@ class StartAnalysisDto {
 @Controller('analysis')
 @UseGuards(AuthGuard)
 export class AnalysisController {
-  constructor(private readonly analysisService: AnalysisService) { }
+  constructor(
+    private readonly analysisService: AnalysisService,
+    private readonly securityAnalysisService: SecurityAnalysisService
+  ) { }
 
   @Post('start')
   @HttpCode(HttpStatus.ACCEPTED)
@@ -29,5 +33,11 @@ export class AnalysisController {
     const user = (req as any).user;
     const projectId = await this.analysisService.startAnalysis(gitUrl, language, user.id);
     return { projectId, status: 'Analyzing' };
+  }
+
+  @Get('security/:projectId')
+  async getSecuritySummary(@Param('projectId') projectId: string) {
+    const summary = await this.securityAnalysisService.getSecuritySummary(parseInt(projectId));
+    return summary;
   }
 }

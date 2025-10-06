@@ -4,6 +4,8 @@ import { AnalysisController } from './analysis.controller';
 import { EnhancedAnalysisService } from './enhanced-analysis.service';
 import { DuplicationDetectionService } from './duplication-detection.service';
 import { AnalysisHelperService } from './analysis-helper.service';
+import { SecurityAnalysisService } from './security-analysis.service';
+import { HardcodedValuesAnalyzer } from './hardcoded-values-analyzer.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ParserService } from '../parser/parser.service';
 import { AuthModule } from '../auth/auth.module';
@@ -18,6 +20,8 @@ import { ValidationModule } from '../validation/validation.module';
     EnhancedAnalysisService,
     DuplicationDetectionService,
     AnalysisHelperService,
+    SecurityAnalysisService,
+    HardcodedValuesAnalyzer,
     ParserService
   ],
   exports: [AnalysisService],
