@@ -183,11 +183,10 @@ const SecurityAnalysisPanel: React.FC<SecurityAnalysisPanelProps> = ({ projectId
         <div className="flex flex-wrap gap-2 mb-4">
           <button
             onClick={() => setSelectedType('all')}
-            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
-              selectedType === 'all'
+            className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${selectedType === 'all'
                 ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                 : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
-            }`}
+              }`}
           >
             All Issues
           </button>
@@ -195,11 +194,10 @@ const SecurityAnalysisPanel: React.FC<SecurityAnalysisPanelProps> = ({ projectId
             <button
               key={type}
               onClick={() => setSelectedType(type)}
-              className={`px-3 py-1 rounded-full text-sm font-medium transition-colors flex items-center gap-1 ${
-                selectedType === type
+              className={`px-3 py-1 rounded-full text-sm font-medium transition-colors flex items-center gap-1 ${selectedType === type
                   ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
                   : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
-              }`}
+                }`}
             >
               {getSecurityIcon(type)}
               {getTypeDisplayName(type)} ({count})
@@ -232,7 +230,7 @@ const SecurityAnalysisPanel: React.FC<SecurityAnalysisPanelProps> = ({ projectId
                   <div className="flex-shrink-0">
                     {getSecurityIcon(issue.issueType)}
                   </div>
-                  
+
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2">
                       <span className={`px-2 py-1 rounded text-xs font-medium border ${getSeverityColor(issue.severity)}`}>
@@ -242,15 +240,15 @@ const SecurityAnalysisPanel: React.FC<SecurityAnalysisPanelProps> = ({ projectId
                         Confidence: {issue.confidence}%
                       </span>
                     </div>
-                    
+
                     <h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 mb-1">
                       {getTypeDisplayName(issue.issueType)}
                     </h4>
-                    
+
                     <p className="text-sm text-neutral-700 dark:text-neutral-300 mb-2">
                       {issue.description}
                     </p>
-                    
+
                     <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded p-3 mb-3">
                       <div className="flex items-start gap-2">
                         <AlertTriangle className="w-4 h-4 text-blue-600 dark:text-blue-400 mt-0.5 flex-shrink-0" />
@@ -260,7 +258,7 @@ const SecurityAnalysisPanel: React.FC<SecurityAnalysisPanelProps> = ({ projectId
                         </div>
                       </div>
                     </div>
-                    
+
                     <div className="flex items-center gap-4 text-xs text-neutral-500 dark:text-neutral-400">
                       <span className="flex items-center gap-1">
                         <FileText className="w-3 h-3" />

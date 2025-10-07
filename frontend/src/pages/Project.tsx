@@ -141,7 +141,7 @@ const Project: React.FC = () => {
       try {
         const { data } = await api.get(`/projects/${projectId}`);
         setData(data);
-        
+
         // Continue polling while analyzing
         if (data && data.status === 'Analyzing') {
           const timer = setTimeout(fetchDetails, 2000);
@@ -162,7 +162,7 @@ const Project: React.FC = () => {
 
   useEffect(() => {
     startPolling();
-    
+
     // Cleanup on unmount
     return () => {
       if (polling) {
@@ -262,10 +262,10 @@ const Project: React.FC = () => {
                       {data?.language}
                     </span>
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-lg text-xs font-semibold ${data?.status === 'Completed'
-                        ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
-                        : data?.status === 'Analyzing'
-                          ? 'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-300'
-                          : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300'
+                      ? 'bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-300'
+                      : data?.status === 'Analyzing'
+                        ? 'bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-300'
+                        : 'bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300'
                       }`}>
                       {data?.status}
                     </span>
@@ -284,11 +284,11 @@ const Project: React.FC = () => {
                   try {
                     // Start re-analysis
                     await api.post(`/projects/${projectId}/reanalyze`, {});
-                    
+
                     // Reset state and restart polling
                     setLoading(true);
                     setError(null);
-                    
+
                     // Restart polling to track the re-analysis progress
                     await startPolling();
                   } catch (e: any) {
@@ -314,11 +314,11 @@ const Project: React.FC = () => {
             {/* Tab Navigation - Only show after analysis completes */}
             <div className="mb-6 bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-2">
               <nav className="flex space-x-2">
-                {[ 
+                {[
                   { id: 'analytics', label: 'Analytics', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>, count: data?.issues?.length || 0 },
                   { id: 'issues', label: 'Issues', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>, count: filteredAndSortedIssues.length },
                   { id: 'duplicates', label: 'Duplicates', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" /></svg>, count: duplicateGroups.length },
-                  { id: 'security', label: 'Security', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 12c.943 0 1.833-.183 2.652-.515a4 4 0 11-5.304 0A8.955 8.955 0 0012 12zm0 0V4a8 8 0 018 8 8 8 0 11-16 0 8 8 0 018-8v8z" /></svg>, count: (data?.issues?.filter(i => ['HardcodedCredentials','HardcodedUrls','HardcodedSecrets','SensitiveFile','UnsafeLogging','WeakEncryption','HardcodedValues'].includes((i as any).issueType)).length) || 0 }
+                  { id: 'security', label: 'Security', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 12c.943 0 1.833-.183 2.652-.515a4 4 0 11-5.304 0A8.955 8.955 0 0012 12zm0 0V4a8 8 0 018 8 8 8 0 11-16 0 8 8 0 018-8v8z" /></svg>, count: (data?.issues?.filter(i => ['HardcodedCredentials', 'HardcodedUrls', 'HardcodedSecrets', 'SensitiveFile', 'UnsafeLogging', 'WeakEncryption', 'HardcodedValues'].includes((i as any).issueType)).length) || 0 }
                 ].map(tab => (
                   <button
                     key={tab.id}
@@ -331,8 +331,8 @@ const Project: React.FC = () => {
                     {tab.icon}
                     <span>{tab.label}</span>
                     <span className={`px-2 py-0.5 rounded-lg text-xs font-semibold ${activeTab === tab.id
-                        ? 'bg-white/20'
-                        : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
+                      ? 'bg-white/20'
+                      : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300'
                       }`}>
                       {tab.count}
                     </span>
@@ -360,8 +360,8 @@ const Project: React.FC = () => {
                       <div key={f} className="flex items-center justify-between gap-2 group">
                         <button
                           className={`text-left flex-1 truncate text-xs py-2 px-3 rounded-lg transition-all ${selectedFile === f
-                              ? 'font-semibold text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20'
-                              : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800'
+                            ? 'font-semibold text-primary-600 dark:text-primary-400 bg-primary-50 dark:bg-primary-900/20'
+                            : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-800'
                             }`}
                           title={f}
                           onClick={() => hasAst(f) ? loadAst(f) : setSelectedFile(f)}

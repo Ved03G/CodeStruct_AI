@@ -142,9 +142,9 @@ const ProjectAnalyticsDashboard: React.FC<Props> = ({ issues }) => {
                             <div key={severity} className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <div className={`w-3 h-3 rounded-full ${severity === 'Critical' ? 'bg-red-500' :
-                                            severity === 'High' ? 'bg-orange-500' :
-                                                severity === 'Medium' ? 'bg-yellow-500' :
-                                                    'bg-green-500'
+                                        severity === 'High' ? 'bg-orange-500' :
+                                            severity === 'Medium' ? 'bg-yellow-500' :
+                                                'bg-green-500'
                                         }`}></div>
                                     <span className="text-sm text-neutral-700 dark:text-neutral-300">{severity}</span>
                                 </div>

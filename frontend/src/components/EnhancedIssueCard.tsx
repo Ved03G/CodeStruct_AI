@@ -36,7 +36,7 @@ const issueTypeColors = {
 
 const EnhancedIssueCard: React.FC<Props> = ({ issue, onRefactorAccept }) => {
     const [showAIRefactor, setShowAIRefactor] = useState(false);
-    
+
     const getConfidenceColor = (confidence: number) => {
         if (confidence >= 90) return 'text-green-600 dark:text-green-400';
         if (confidence >= 75) return 'text-yellow-600 dark:text-yellow-400';
