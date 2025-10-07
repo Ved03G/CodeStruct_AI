@@ -80,7 +80,7 @@ export class ProjectsController {
     const id = Number(projectId);
     const project = await (this.prisma as any).project.findUnique({ where: { id } });
     if (!project) return { error: 'Not found' };
-    await (this.prisma as any).project.update({ where: { id }, data: { status: 'Analyzing' } });
+    await (this.prisma as any).project.update({ where: { id }, data: { status: 'Analyzing', analysisStage: 'cloning' } });
     // Fire-and-forget using existing start logic
     await this.analysis.startAnalysis(project.gitUrl, body?.language || project.language, project.userId);
     return { ok: true };

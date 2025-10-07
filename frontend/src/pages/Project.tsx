@@ -123,25 +123,46 @@ const Project: React.FC = () => {
   const filesUnion: string[] = data ? Array.from(new Set([...(data.files || []), ...((data.astFiles as string[]) || [])])) : [];
   const hasAst = (f: string) => (data?.astFiles || []).includes(f);
 
-  useEffect(() => {
-    let timer: any;
+  // Function to start/restart polling
+  const startPolling = async () => {
+    // Clear any existing polling timer
+    if (polling) {
+      clearTimeout(polling);
+      setPolling(null);
+    }
+
     const fetchDetails = async () => {
       try {
         const { data } = await api.get(`/projects/${projectId}`);
         setData(data);
+        
         // Continue polling while analyzing
         if (data && data.status === 'Analyzing') {
-          timer = setTimeout(fetchDetails, 2000);
+          const timer = setTimeout(fetchDetails, 2000);
           setPolling(timer);
+        } else {
+          setPolling(null);
         }
       } catch (e: any) {
         setError(e?.message ?? 'Failed to load project');
+        setPolling(null);
       } finally {
         setLoading(false);
       }
     };
-    fetchDetails();
-    return () => timer && clearTimeout(timer);
+
+    await fetchDetails();
+  };
+
+  useEffect(() => {
+    startPolling();
+    
+    // Cleanup on unmount
+    return () => {
+      if (polling) {
+        clearTimeout(polling);
+      }
+    };
   }, [projectId]);
 
   const loadAst = async (filePath: string) => {
@@ -255,12 +276,18 @@ const Project: React.FC = () => {
                 className="inline-flex items-center px-4 py-2 bg-neutral-700 dark:bg-neutral-700 hover:bg-neutral-800 dark:hover:bg-neutral-600 text-white text-sm font-semibold rounded-xl transition-colors"
                 onClick={async () => {
                   try {
+                    // Start re-analysis
                     await api.post(`/projects/${projectId}/reanalyze`, {});
+                    
+                    // Reset state and restart polling
                     setLoading(true);
-                    const { data } = await api.get(`/projects/${projectId}`);
-                    setData(data);
+                    setError(null);
+                    
+                    // Restart polling to track the re-analysis progress
+                    await startPolling();
                   } catch (e: any) {
                     setError(e?.message ?? 'Failed to start re-analysis');
+                    setLoading(false);
                   }
                 }}
               >

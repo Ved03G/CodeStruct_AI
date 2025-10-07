@@ -52,12 +52,13 @@ export class AnalysisService {
     // Create project or reuse existing
     const project = await (this.prisma as any).project.upsert({
       where: { gitUrl },
-      update: { status: 'Analyzing' },
+      update: { status: 'Analyzing', analysisStage: 'cloning' },
       create: {
         name: this.deriveProjectName(gitUrl),
         gitUrl,
         language: language || 'auto-detect',
         status: 'Analyzing',
+        analysisStage: 'cloning',
         user: userId
           ? { connect: { id: userId } }
           : { create: { email: `${Date.now()}@placeholder.local` } },
