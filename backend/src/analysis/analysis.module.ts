@@ -9,12 +9,11 @@ import { HardcodedValuesAnalyzer } from './hardcoded-values-analyzer.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { ParserService } from '../parser/parser.service';
 import { AuthModule } from '../auth/auth.module';
-import { RefactoringModule } from '../refactoring/refactoring.module';
 import { GitHubModule } from '../github/github.module';
 import { ValidationModule } from '../validation/validation.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, RefactoringModule, GitHubModule, ValidationModule],
+  imports: [PrismaModule, AuthModule, GitHubModule, ValidationModule],
   providers: [
     AnalysisService,
     EnhancedAnalysisService,

@@ -3,7 +3,6 @@ import { ParserService } from '../parser/parser.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { EnhancedAnalysisService } from './enhanced-analysis.service';
 import { DuplicationDetectionService } from './duplication-detection.service';
-import { RefactoringService } from '../refactoring/refactoring.service';
 import { GitHubPRService } from '../github/github-pr.service';
 import simpleGit from 'simple-git';
 import { tmpdir } from 'os';
@@ -25,7 +24,6 @@ export class AnalysisService {
     private readonly parserService: ParserService,
     private readonly enhancedAnalysisService: EnhancedAnalysisService,
     private readonly duplicationDetectionService: DuplicationDetectionService,
-    private readonly refactoringService: RefactoringService,
     private readonly githubPRService: GitHubPRService,
   ) {
     const th = Number(process.env.ANALYSIS_COMPLEXITY_THRESHOLD);
@@ -458,11 +456,9 @@ export class AnalysisService {
       }
       this.dlog('analysis complete', { totalIssues: created, filesVisited, filesAnalyzed });
       // Mark project completed
-      await (this.prisma as any).project.update({ where: { id: projectId }, data: { status: 'Completed', analysisStage: 'refactoring' } });
+      await (this.prisma as any).project.update({ where: { id: projectId }, data: { status: 'Completed', analysisStage: 'completed' } });
 
-      // Automatically generate fixes and create PR
-      this.dlog('triggering automatic refactoring and PR creation');
-      await this.autoGenerateFixesAndCreatePR(projectId, userId);
+      this.dlog('Analysis completed successfully');
     } catch (e) {
       // Mark project failed
       try {
@@ -1218,128 +1214,6 @@ export class AnalysisService {
       this.dlog(`[Stage] Updated to: ${stage}`, { projectId });
     } catch (error) {
       this.dlog(`[Stage] Failed to update stage:`, error);
-    }
-  }
-
-  /**
-   * Automatically generate refactoring fixes and create a PR after analysis completes
-   */
-  private async autoGenerateFixesAndCreatePR(projectId: number, userId?: number) {
-    try {
-      this.dlog('[Auto-Refactor] Starting automatic refactoring for project', { projectId, userId });
-
-      // Skip if no userId (need GitHub token for PR)
-      if (!userId) {
-        this.dlog('[Auto-Refactor] Skipping - no userId provided');
-        return;
-      }
-
-      // Get user to check for GitHub token
-      const user = await (this.prisma as any).user.findUnique({ where: { id: userId } });
-      if (!user?.githubAccessToken) {
-        this.dlog('[Auto-Refactor] Skipping - user has no GitHub access token');
-        return;
-      }
-
-      // Get all issues for this project
-      const issues = await (this.prisma as any).issue.findMany({
-        where: { projectId: projectId }
-      });
-
-      if (issues.length === 0) {
-        this.dlog('[Auto-Refactor] No issues found for project');
-        return;
-      }
-
-      this.dlog('[Auto-Refactor] Found issues:', { count: issues.length });
-
-      // Extract issue IDs
-      const issueIds = issues.map((issue: any) => issue.id);
-
-      // Step 1: Generate fixes for all issues
-      this.dlog('[Auto-Refactor] Generating fixes for all issues...');
-      const fixResults = await this.refactoringService.bulkGenerateFixes(issueIds, projectId);
-
-      const successfulFixes = fixResults.filter((r: any) => r.success);
-      this.dlog('[Auto-Refactor] Fix generation completed', {
-        total: fixResults.length,
-        successful: successfulFixes.length
-      });
-
-      if (successfulFixes.length === 0) {
-        this.dlog('[Auto-Refactor] No successful fixes generated');
-        return;
-      }
-
-      // Step 2: Get refactoring data for successful fixes
-      const acceptedIssueIds = successfulFixes.map((r: any) => r.issueId);
-      const acceptedRefactorings = await this.getAcceptedRefactoringsData(acceptedIssueIds);
-
-      if (acceptedRefactorings.length === 0) {
-        this.dlog('[Auto-Refactor] No refactoring data available');
-        return;
-      }
-
-      // Step 3: Mark all as accepted
-      await this.markRefactoringsAsAccepted(acceptedIssueIds);
-      this.dlog('[Auto-Refactor] Marked refactorings as accepted');
-
-      // Step 4: Create PR
-      await this.updateAnalysisStage(projectId, 'pr');
-      this.dlog('[Auto-Refactor] Creating pull request...');
-      const prResult = await this.githubPRService.createRefactoringPR(
-        userId,
-        projectId,
-        acceptedRefactorings
-      );
-
-      await this.updateAnalysisStage(projectId, 'completed');
-      this.dlog('[Auto-Refactor] Pull request created successfully', {
-        url: prResult.pullRequest.url,
-        number: prResult.pullRequest.number,
-        filesModified: prResult.filesModified,
-        refactoringsApplied: prResult.refactoringsApplied
-      });
-
-    } catch (error: any) {
-      // Log error but don't fail the analysis
-      this.dlog('[Auto-Refactor] Error during automatic refactoring:', error?.message || 'Unknown error');
-      console.error('[Auto-Refactor] Failed to auto-generate fixes and PR:', error);
-    }
-  }
-
-  private async getAcceptedRefactoringsData(issueIds: number[]) {
-    const refactorings = [];
-
-    for (const issueId of issueIds) {
-      try {
-        const suggestion = await this.refactoringService.getRefactoringSuggestion(issueId);
-        if (suggestion) {
-          refactorings.push({
-            issueId: issueId,
-            filePath: suggestion.issue.filePath,
-            originalCode: suggestion.originalCode,
-            refactoredCode: suggestion.refactoredCode,
-            issueType: suggestion.issue.issueType,
-            lineStart: suggestion.issue.lineStart || 1,
-            lineEnd: suggestion.issue.lineEnd || 1,
-          });
-        }
-      } catch (error) {
-        this.dlog(`[Auto-Refactor] Failed to get refactoring data for issue ${issueId}:`, error);
-      }
-    }
-
-    return refactorings;
-  }
-
-  private async markRefactoringsAsAccepted(issueIds: number[]) {
-    for (const issueId of issueIds) {
-      try {
-        await this.refactoringService.acceptRefactoringSuggestion(issueId);
-      } catch (error) {
-        this.dlog(`[Auto-Refactor] Failed to mark issue ${issueId} as accepted:`, error);
-      }
     }
   }
 }
