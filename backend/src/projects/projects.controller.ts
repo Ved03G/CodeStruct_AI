@@ -80,7 +80,7 @@ export class ProjectsController {
     const id = Number(projectId);
     const project = await (this.prisma as any).project.findUnique({ where: { id } });
     if (!project) return { error: 'Not found' };
-    await (this.prisma as any).project.update({ where: { id }, data: { status: 'Analyzing' } });
+    await (this.prisma as any).project.update({ where: { id }, data: { status: 'Analyzing', analysisStage: 'cloning' } });
     // Fire-and-forget using existing start logic
     await this.analysis.startAnalysis(project.gitUrl, body?.language || project.language, project.userId);
     return { ok: true };
@@ -95,5 +95,53 @@ export class ProjectsController {
     await (this.prisma as any).project.update({ where: { id }, data: { status: 'Analyzing' } });
     await this.analysis.startAnalysis(project.gitUrl, body?.language || project.language, project.userId);
     return { projectId: id, status: 'Analyzing' };
+  }
+
+  @Get(':projectId/accepted-refactorings')
+  async getAcceptedRefactorings(@Param('projectId') projectId: string) {
+    const id = Number(projectId);
+    
+    // Get all accepted refactoring suggestions for this project
+    const refactorings = await (this.prisma as any).refactoringSuggestion.findMany({
+      where: {
+        status: 'accepted',
+        issue: {
+          projectId: id
+        }
+      },
+      include: {
+        issue: {
+          select: {
+            id: true,
+            issueType: true,
+            filePath: true,
+            description: true,
+            codeBlock: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    const formattedRefactorings = refactorings.map((suggestion: any) => ({
+      id: suggestion.id,
+      issueId: suggestion.issue.id,
+      issueType: suggestion.issue.issueType,
+      filePath: suggestion.issue.filePath,
+      description: suggestion.description,
+      suggestedCode: suggestion.suggestedCode,
+      originalCode: suggestion.issue.codeBlock,
+      confidence: suggestion.confidence,
+      verificationBadge: suggestion.verificationBadge || 'unknown',
+      validationLayers: suggestion.validationLayers ? JSON.parse(suggestion.validationLayers) : null,
+      createdAt: suggestion.createdAt
+    }));
+
+    return {
+      refactorings: formattedRefactorings,
+      total: formattedRefactorings.length
+    };
   }
 }

@@ -39,18 +39,6 @@ const stages: AnalysisStage[] = [
         icon: '🔄'
     },
     {
-        id: 'refactoring',
-        label: 'Generating AI Fixes',
-        description: 'Creating refactoring suggestions',
-        icon: '🤖'
-    },
-    {
-        id: 'pr',
-        label: 'Creating Pull Request',
-        description: 'Preparing automated PR',
-        icon: '🚀'
-    },
-    {
         id: 'completed',
         label: 'Analysis Complete',
         description: 'Ready for review',

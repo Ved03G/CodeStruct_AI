@@ -60,20 +60,25 @@ model Issue {
 }
 
 model RefactoringSuggestion {
-  id             Int      @id @default(autoincrement())
-  issueId        Int
-  originalCode   String
-  refactoredCode String
-  explanation    String
-  confidence     Int      @default(75)
-  changes        Json
-  status         String   @default("pending")
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  issue          Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
+  id               Int      @id @default(autoincrement())
+  issueId          Int
+  originalCode     String
+  refactoredCode   String
+  explanation      String
+  confidence       Int      @default(75)
+  changes          Json
+  status           String   @default("pending")
+  // RefactoringMirror validation fields
+  isVerified       Boolean  @default(false)
+  verificationBadge String  @default("failed")
+  validationLayers Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  issue            Issue    @relation(fields: [issueId], references: [id], onDelete: Cascade)
 
   @@index([issueId])
   @@index([status])
+  @@index([isVerified])
 }
 
 model FileAst {

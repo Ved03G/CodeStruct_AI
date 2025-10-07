@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { RefactoringMirrorService, RefactoringMirrorResult } from '../validation/refactoring-mirror.service';
 
 export interface RefactoringSuggestion {
     issueId: number;
@@ -13,6 +14,10 @@ export interface RefactoringSuggestion {
         content: string;
     }>;
     confidence: number;
+    // RefactoringMirror validation results
+    validationResult?: RefactoringMirrorResult;
+    isVerified?: boolean;
+    verificationBadge?: 'verified' | 'warning' | 'failed';
 }
 
 @Injectable()
@@ -20,7 +25,10 @@ export class AIRefactoringService {
     private readonly genAI: GoogleGenerativeAI;
     private readonly model: any;
 
-    constructor(private readonly prisma: PrismaService) {
+    constructor(
+        private readonly prisma: PrismaService,
+        private readonly refactoringMirror: RefactoringMirrorService
+    ) {
         const apiKey = process.env.GEMINI_API_KEY;
         if (!apiKey) {
             console.warn('GEMINI_API_KEY environment variable is not set');
@@ -55,8 +63,29 @@ export class AIRefactoringService {
         // Call Gemini API
         const refactoredCode = await this.callGemini(prompt, issue.codeBlock);
 
-        // Parse and validate the response
+        // Parse the AI response
         const suggestion = this.parseAIResponse(refactoredCode, issue);
+
+        // 🔍 REFACTORING MIRROR VALIDATION 🔍
+        console.log('[AI-Refactoring] Running RefactoringMirror validation...');
+        const validationResult = await this.refactoringMirror.validateRefactoring(
+            issue.codeBlock,
+            refactoredCode,
+            issue.project.language,
+            issue.issueType
+        );
+
+        // Update suggestion with validation results
+        suggestion.validationResult = validationResult;
+        suggestion.isVerified = validationResult.isVerified;
+        suggestion.verificationBadge = validationResult.verificationBadge;
+        
+        // Override confidence if validation provides higher confidence
+        if (validationResult.confidence > suggestion.confidence) {
+            suggestion.confidence = validationResult.confidence;
+        }
+
+        console.log(`[AI-Refactoring] RefactoringMirror result: ${validationResult.verificationBadge} (${validationResult.confidence}% confidence)`);
 
         // Store suggestion in database
         await this.storeSuggestion(issueId, suggestion);
@@ -290,6 +319,10 @@ ${prompt}`;
                     confidence: suggestion.confidence,
                     status: 'pending',
                     changes: suggestion.changes as any,
+                    // RefactoringMirror validation fields
+                    isVerified: suggestion.isVerified || false,
+                    verificationBadge: suggestion.verificationBadge || 'failed',
+                    validationLayers: suggestion.validationResult?.validationLayers || null,
                 },
             });
         } catch (error) {
