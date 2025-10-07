@@ -5,9 +5,10 @@ import { AIRefactoringService } from './ai-refactoring.service';
 import { PrismaModule } from '../prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { GitHubModule } from '../github/github.module';
+import { ValidationModule } from '../validation/validation.module';
 
 @Module({
-  imports: [PrismaModule, AuthModule, GitHubModule],
+  imports: [PrismaModule, AuthModule, GitHubModule, ValidationModule],
   providers: [RefactoringService, AIRefactoringService],
   controllers: [RefactoringController],
   exports: [RefactoringService, AIRefactoringService],

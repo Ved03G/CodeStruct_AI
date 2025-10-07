@@ -8,6 +8,7 @@ import SecurityAnalysisPanel from '../components/SecurityAnalysisPanel';
 import EnhancedIssueFilters from '../components/EnhancedIssueFilters';
 import DarkModeToggle from '../components/DarkModeToggle';
 import BulkAIRefactorViewer from '../components/BulkAIRefactorViewer';
+import AcceptedRefactoringsManager from '../components/AcceptedRefactoringsManager';
 import AnalysisProgressLoader from '../components/AnalysisProgressLoader';
 import { EnhancedIssue, ProjectData } from '../types/analysis';
 
@@ -35,10 +36,15 @@ const Project: React.FC = () => {
 
   // Bulk refactoring state
   const [showBulkRefactor, setShowBulkRefactor] = useState(false);
+  const [showAcceptedRefactorings, setShowAcceptedRefactorings] = useState(false);
 
   const handleBulkRefactor = async () => {
     if (!data?.issues || filteredAndSortedIssues.length === 0) return;
     setShowBulkRefactor(true);
+  };
+
+  const handleAcceptedRefactorings = () => {
+    setShowAcceptedRefactorings(true);
   };
 
   // Filter and sort issues - moved before early returns
@@ -381,18 +387,32 @@ const Project: React.FC = () => {
                       onFiltersChange={setFilters}
                     />
 
-                    {/* Bulk Fix Button */}
-                    {filteredAndSortedIssues.length > 0 && (
+                    {/* Action Buttons */}
+                    <div className="space-y-3">
+                      {/* Bulk Fix Button */}
+                      {filteredAndSortedIssues.length > 0 && (
+                        <button
+                          onClick={handleBulkRefactor}
+                          className="w-full bg-accent-600 hover:bg-accent-700 text-white px-6 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors hover:shadow-lg"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          </svg>
+                          AI Fix All ({filteredAndSortedIssues.length})
+                        </button>
+                      )}
+
+                      {/* Create PR from Accepted Refactorings */}
                       <button
-                        onClick={handleBulkRefactor}
-                        className="w-full bg-accent-600 hover:bg-accent-700 text-white px-6 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors hover:shadow-lg"
+                        onClick={handleAcceptedRefactorings}
+                        className="w-full bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-xl font-semibold flex items-center justify-center gap-2 transition-colors hover:shadow-lg"
                       >
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
-                        AI Fix All ({filteredAndSortedIssues.length})
+                        Create PR from Accepted Fixes
                       </button>
-                    )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -534,6 +554,14 @@ const Project: React.FC = () => {
                   setData(refreshedData);
                   setShowBulkRefactor(false);
                 }}
+              />
+            )}
+
+            {/* Accepted Refactorings Manager */}
+            {showAcceptedRefactorings && (
+              <AcceptedRefactoringsManager
+                projectId={Number(projectId)}
+                onClose={() => setShowAcceptedRefactorings(false)}
               />
             )}
           </>
