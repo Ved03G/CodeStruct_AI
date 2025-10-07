@@ -335,7 +335,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
           </div>
           <pre className="text-xs bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded p-4 overflow-x-auto max-h-96">
             {originalLines.map((line: string, i: number) => {
-              const isChanged = result.suggestion.changes.some((c: any) => c.lineNumber === i + 1 && c.type !== 'add');
+              const isChanged = result.suggestion.changes?.some((c: any) => c.lineNumber === i + 1 && c.type !== 'add') || false;
               return (
                 <div
                   key={i}
@@ -361,7 +361,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
           </div>
           <pre className="text-xs bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded p-4 overflow-x-auto max-h-96">
             {refactoredLines.map((line: string, i: number) => {
-              const change = result.suggestion.changes.find((c: any) => c.lineNumber === i + 1);
+              const change = result.suggestion.changes?.find((c: any) => c.lineNumber === i + 1);
               const isChanged = !!change;
               const isAdded = change?.type === 'add';
               
