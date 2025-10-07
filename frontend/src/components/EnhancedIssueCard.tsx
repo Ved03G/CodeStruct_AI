@@ -78,7 +78,7 @@ const EnhancedIssueCard: React.FC<Props> = ({ issue, onRefactorAccept }) => {
     const metrics = formatMetrics(issue.metadata || {});
 
     return (
-        <div className="border rounded-lg p-4 bg-white dark:bg-slate-800 dark:border-slate-700 shadow-sm space-y-3">
+        <div className="border rounded-lg p-4 bg-white dark:bg-neutral-900 dark:border-neutral-800 shadow-sm space-y-3">
             {/* Header */}
             <div className="flex items-start justify-between">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -92,7 +92,7 @@ const EnhancedIssueCard: React.FC<Props> = ({ issue, onRefactorAccept }) => {
                         {issue.confidence}% confidence
                     </span>
                 </div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">
+                <div className="text-xs text-neutral-500 dark:text-neutral-400">
                     {issue.filePath}
                     {issue.lineStart && issue.lineEnd && (
                         <span className="ml-1">:{issue.lineStart}-{issue.lineEnd}</span>
@@ -118,7 +118,7 @@ const EnhancedIssueCard: React.FC<Props> = ({ issue, onRefactorAccept }) => {
 
             {/* Description */}
             {issue.description && (
-                <div className="text-sm text-slate-700 dark:text-slate-300">
+                <div className="text-sm text-neutral-700 dark:text-neutral-300">
                     {issue.description}
                 </div>
             )}
@@ -129,7 +129,7 @@ const EnhancedIssueCard: React.FC<Props> = ({ issue, onRefactorAccept }) => {
                     {metrics.map((metric, index) => (
                         <span
                             key={index}
-                            className="text-xs px-2 py-1 bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 rounded"
+                            className="text-xs px-2 py-1 bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-300 rounded"
                         >
                             {metric}
                         </span>
@@ -167,20 +167,20 @@ const EnhancedIssueCard: React.FC<Props> = ({ issue, onRefactorAccept }) => {
             )}
 
             {/* Code Block Preview */}
-            <div className="border rounded bg-slate-50 dark:bg-slate-900/60 dark:border-slate-700">
-                <div className="px-3 py-2 border-b dark:border-slate-700 flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+            <div className="border rounded bg-neutral-50 dark:bg-neutral-900/60 dark:border-neutral-800">
+                <div className="px-3 py-2 border-b dark:border-neutral-800 flex items-center justify-between">
+                    <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300">
                         Code Block
                     </span>
                     <button
-                        className="text-xs px-2 py-1 bg-slate-200 dark:bg-slate-600 hover:bg-slate-300 dark:hover:bg-slate-500 text-slate-700 dark:text-slate-200 rounded transition-colors"
+                        className="text-xs px-2 py-1 bg-neutral-200 dark:bg-neutral-700 hover:bg-neutral-300 dark:hover:bg-neutral-600 text-neutral-700 dark:text-neutral-200 rounded transition-colors"
                         onClick={() => navigator.clipboard.writeText(issue.codeBlock)}
                         title="Copy code to clipboard"
                     >
                         Copy
                     </button>
                 </div>
-                <pre className="text-xs p-3 overflow-auto max-h-32 text-slate-800 dark:text-slate-200 whitespace-pre-wrap">
+                <pre className="text-xs p-3 overflow-auto max-h-32 text-neutral-800 dark:text-neutral-200 whitespace-pre-wrap">
                     {issue.codeBlock}
                 </pre>
             </div>

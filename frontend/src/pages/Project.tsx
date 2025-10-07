@@ -496,7 +496,7 @@ const Project: React.FC = () => {
                                 <span className="text-xs px-3 py-1 rounded-lg bg-warning-100 dark:bg-warning-900/30 text-warning-700 dark:text-warning-300 font-medium">
                                   {group.totalInstances} instances
                                 </span>
-                                <span className="text-xs px-3 py-1 rounded-lg bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 font-medium">
+                                <span className="text-xs px-3 py-1 rounded-lg bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 font-medium">
                                   {group.affectedFiles.length} files
                                 </span>
                               </div>
@@ -514,28 +514,28 @@ const Project: React.FC = () => {
                 )}
 
                 {/* AST Viewer */}
-                <div className="mt-6 bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg">
-                  <div className="px-4 py-3 border-b dark:border-slate-700 flex items-center justify-between">
-                    <div className="text-sm font-semibold text-slate-800 dark:text-slate-200">AST Viewer</div>
-                    <div className="text-xs text-slate-600 dark:text-slate-300 truncate max-w-[70%]" title={selectedFile || ''}>
+                <div className="mt-6 bg-white dark:bg-neutral-900 border dark:border-neutral-800 rounded-lg">
+                  <div className="px-4 py-3 border-b dark:border-neutral-800 flex items-center justify-between">
+                    <div className="text-sm font-semibold text-neutral-800 dark:text-neutral-200">AST Viewer</div>
+                    <div className="text-xs text-neutral-600 dark:text-neutral-300 truncate max-w-[70%]" title={selectedFile || ''}>
                       {selectedFile ? selectedFile : 'Select a file with AST badge from the sidebar'}
                     </div>
                   </div>
                   <div className="p-4">
-                    {astLoading && <div className="text-sm text-slate-600 dark:text-slate-400">Loading AST…</div>}
+                    {astLoading && <div className="text-sm text-neutral-600 dark:text-neutral-400">Loading AST…</div>}
                     {astError && <div className="text-sm text-red-600 dark:text-red-400">{astError}</div>}
                     {!astLoading && !astError && ast && (
                       <div className="space-y-3">
-                        <div className="text-xs text-slate-600 dark:text-slate-300">
+                        <div className="text-xs text-neutral-600 dark:text-neutral-300">
                           Language: {ast.language} • Format: {ast.format}
                         </div>
-                        <pre className="text-xs overflow-auto max-h-96 p-4 bg-slate-50 dark:bg-slate-900/60 border dark:border-slate-700 rounded whitespace-pre-wrap break-words text-slate-900 dark:text-slate-100">
+                        <pre className="text-xs overflow-auto max-h-96 p-4 bg-neutral-50 dark:bg-neutral-900/60 border dark:border-neutral-800 rounded whitespace-pre-wrap break-words text-neutral-900 dark:text-neutral-100">
                           {ast.ast}
                         </pre>
                       </div>
                     )}
                     {!astLoading && !astError && !ast && (
-                      <div className="text-sm text-slate-600 dark:text-slate-300">No AST loaded.</div>
+                      <div className="text-sm text-neutral-600 dark:text-neutral-300">No AST loaded.</div>
                     )}
                   </div>
                 </div>
