@@ -64,7 +64,7 @@ const ProjectAnalyticsDashboard: React.FC<Props> = ({ issues }) => {
             Medium: 'text-yellow-600 dark:text-yellow-400',
             Low: 'text-green-600 dark:text-green-400'
         };
-        return colors[severity as keyof typeof colors] || 'text-slate-600 dark:text-slate-400';
+        return colors[severity as keyof typeof colors] || 'text-neutral-600 dark:text-neutral-400';
     };
 
     const getQualityScoreColor = (score: number) => {
@@ -84,12 +84,12 @@ const ProjectAnalyticsDashboard: React.FC<Props> = ({ issues }) => {
     return (
         <div className="space-y-4">
             {/* Quality Score */}
-            <div className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-4">
+            <div className="bg-white dark:bg-neutral-900 border dark:border-neutral-800 rounded-lg p-4">
                 <div className="text-center">
                     <div className={`text-4xl font-bold ${getQualityScoreColor(analytics.qualityScore)}`}>
                         {analytics.qualityScore}
                     </div>
-                    <div className="text-sm text-slate-600 dark:text-slate-400">
+                    <div className="text-sm text-neutral-600 dark:text-neutral-400">
                         Code Quality Score • {getQualityScoreLabel(analytics.qualityScore)}
                     </div>
                 </div>
@@ -97,38 +97,38 @@ const ProjectAnalyticsDashboard: React.FC<Props> = ({ issues }) => {
 
             {/* Quick Stats */}
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-3 text-center">
-                    <div className="text-2xl font-semibold text-slate-800 dark:text-slate-200">
+                <div className="bg-white dark:bg-neutral-900 border dark:border-neutral-800 rounded-lg p-3 text-center">
+                    <div className="text-2xl font-semibold text-neutral-800 dark:text-neutral-200">
                         {analytics.totalIssues}
                     </div>
-                    <div className="text-xs text-slate-600 dark:text-slate-400">Total Issues</div>
+                    <div className="text-xs text-neutral-600 dark:text-neutral-400">Total Issues</div>
                 </div>
 
-                <div className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-3 text-center">
+                <div className="bg-white dark:bg-neutral-900 border dark:border-neutral-800 rounded-lg p-3 text-center">
                     <div className="text-2xl font-semibold text-red-600 dark:text-red-400">
                         {analytics.issuesBySeverity.Critical || 0}
                     </div>
-                    <div className="text-xs text-slate-600 dark:text-slate-400">Critical Issues</div>
+                    <div className="text-xs text-neutral-600 dark:text-neutral-400">Critical Issues</div>
                 </div>
 
-                <div className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-3 text-center">
-                    <div className="text-2xl font-semibold text-blue-600 dark:text-blue-400">
+                <div className="bg-white dark:bg-neutral-900 border dark:border-neutral-800 rounded-lg p-3 text-center">
+                    <div className="text-2xl font-semibold text-neutral-800 dark:text-neutral-200">
                         {analytics.duplicateGroupsCount}
                     </div>
-                    <div className="text-xs text-slate-600 dark:text-slate-400">Duplicate Groups</div>
+                    <div className="text-xs text-neutral-600 dark:text-neutral-400">Duplicate Groups</div>
                 </div>
 
-                <div className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-3 text-center">
-                    <div className="text-2xl font-semibold text-purple-600 dark:text-purple-400">
+                <div className="bg-white dark:bg-neutral-900 border dark:border-neutral-800 rounded-lg p-3 text-center">
+                    <div className="text-2xl font-semibold text-neutral-800 dark:text-neutral-200">
                         {Object.keys(analytics.issuesByType).length}
                     </div>
-                    <div className="text-xs text-slate-600 dark:text-slate-400">Issue Types</div>
+                    <div className="text-xs text-neutral-600 dark:text-neutral-400">Issue Types</div>
                 </div>
             </div>
 
             {/* Severity Breakdown */}
-            <div className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-4">
-                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">
+            <div className="bg-white dark:bg-neutral-900 border dark:border-neutral-800 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-neutral-800 dark:text-neutral-200 mb-3">
                     Issues by Severity
                 </h3>
                 <div className="space-y-2">
@@ -142,17 +142,17 @@ const ProjectAnalyticsDashboard: React.FC<Props> = ({ issues }) => {
                             <div key={severity} className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
                                     <div className={`w-3 h-3 rounded-full ${severity === 'Critical' ? 'bg-red-500' :
-                                            severity === 'High' ? 'bg-orange-500' :
-                                                severity === 'Medium' ? 'bg-yellow-500' :
-                                                    'bg-green-500'
+                                        severity === 'High' ? 'bg-orange-500' :
+                                            severity === 'Medium' ? 'bg-yellow-500' :
+                                                'bg-green-500'
                                         }`}></div>
-                                    <span className="text-sm text-slate-700 dark:text-slate-300">{severity}</span>
+                                    <span className="text-sm text-neutral-700 dark:text-neutral-300">{severity}</span>
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <span className={`text-sm font-medium ${getSeverityColor(severity)}`}>
                                         {count}
                                     </span>
-                                    <span className="text-xs text-slate-500 dark:text-slate-400">
+                                    <span className="text-xs text-neutral-500 dark:text-neutral-400">
                                         ({percentage}%)
                                     </span>
                                 </div>
@@ -163,17 +163,17 @@ const ProjectAnalyticsDashboard: React.FC<Props> = ({ issues }) => {
             </div>
 
             {/* Issue Types Breakdown */}
-            <div className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-4">
-                <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">
+            <div className="bg-white dark:bg-neutral-900 border dark:border-neutral-800 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-neutral-800 dark:text-neutral-200 mb-3">
                     Issues by Type
                 </h3>
                 <div className="grid grid-cols-2 gap-2">
                     {Object.entries(analytics.issuesByType)
                         .sort(([, a], [, b]) => b - a)
                         .map(([type, count]) => (
-                            <div key={type} className="flex items-center justify-between p-2 bg-slate-50 dark:bg-slate-900/60 rounded">
-                                <span className="text-xs text-slate-700 dark:text-slate-300">{type}</span>
-                                <span className="text-xs font-medium text-slate-900 dark:text-slate-100">{count}</span>
+                            <div key={type} className="flex items-center justify-between p-2 bg-neutral-50 dark:bg-neutral-900/60 rounded">
+                                <span className="text-xs text-neutral-700 dark:text-neutral-300">{type}</span>
+                                <span className="text-xs font-medium text-neutral-900 dark:text-neutral-100">{count}</span>
                             </div>
                         ))}
                 </div>
@@ -181,20 +181,20 @@ const ProjectAnalyticsDashboard: React.FC<Props> = ({ issues }) => {
 
             {/* Duplicate Code Analysis */}
             {analytics.duplicateGroupsCount > 0 && (
-                <div className="bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-4">
-                    <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200 mb-3">
+                <div className="bg-white dark:bg-neutral-900 border dark:border-neutral-800 rounded-lg p-4">
+                    <h3 className="text-sm font-semibold text-neutral-800 dark:text-neutral-200 mb-3">
                         Code Duplication Analysis
                     </h3>
                     <div className="space-y-2">
                         <div className="flex justify-between text-sm">
-                            <span className="text-slate-600 dark:text-slate-400">Duplicate Groups:</span>
-                            <span className="text-slate-900 dark:text-slate-100 font-medium">
+                            <span className="text-neutral-600 dark:text-neutral-400">Duplicate Groups:</span>
+                            <span className="text-neutral-900 dark:text-neutral-100 font-medium">
                                 {analytics.duplicateGroupsCount}
                             </span>
                         </div>
                         <div className="flex justify-between text-sm">
-                            <span className="text-slate-600 dark:text-slate-400">Total Instances:</span>
-                            <span className="text-slate-900 dark:text-slate-100 font-medium">
+                            <span className="text-neutral-600 dark:text-neutral-400">Total Instances:</span>
+                            <span className="text-neutral-900 dark:text-neutral-100 font-medium">
                                 {analytics.duplicateInstancesCount}
                             </span>
                         </div>

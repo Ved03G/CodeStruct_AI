@@ -18,6 +18,7 @@ export class ProjectsController {
       name: p.name,
       language: p.language,
       status: p.status,
+      analysisStage: p.analysisStage, // Include analysis stage for frontend progress tracking
       issueSummary: {
         total: p.issues.length,
         highComplexity: p.issues.filter((i: any) => i.issueType === 'HighComplexity').length,
@@ -47,6 +48,7 @@ export class ProjectsController {
       name: project.name,
       language: project.language,
       status: project.status,
+      analysisStage: project.analysisStage, // Include analysis stage for frontend progress tracking
       files,
       fileInventory: inv,
       astFiles: Array.from(astAvailable),
@@ -100,7 +102,7 @@ export class ProjectsController {
   @Get(':projectId/accepted-refactorings')
   async getAcceptedRefactorings(@Param('projectId') projectId: string) {
     const id = Number(projectId);
-    
+
     // Get all accepted refactoring suggestions for this project
     const refactorings = await (this.prisma as any).refactoringSuggestion.findMany({
       where: {
