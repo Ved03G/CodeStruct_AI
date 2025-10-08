@@ -111,7 +111,7 @@ const RefactoringView: React.FC<Props> = ({ issue }) => {
   const getLayerIcon = (passed: boolean) => passed ? '✅' : '❌';
 
   return (
-    <div className="border rounded-md p-4 bg-white dark:bg-slate-800 dark:border-slate-700 dark:text-slate-100 shadow-sm">
+    <div className="border rounded-md p-4 bg-white dark:bg-neutral-800 dark:border-neutral-700 dark:text-neutral-100 shadow-sm">
       <div className="flex items-center justify-between mb-2">
         <h3 className="font-semibold">AI Refactoring Suggestion</h3>
         <button
@@ -122,13 +122,13 @@ const RefactoringView: React.FC<Props> = ({ issue }) => {
           {loading ? 'Generating…' : 'Generate AI Fix'}
         </button>
       </div>
-      
+
       {error && <div className="text-red-600 mb-2">{error}</div>}
-      
+
       {suggestion && (
         <div className="space-y-4">
           {/* Validation Status */}
-          <div className="bg-gray-50 dark:bg-slate-700 rounded-lg p-3">
+          <div className="bg-gray-50 dark:bg-neutral-800 rounded-lg p-3">
             <div className="flex items-center justify-between mb-2">
               <h4 className="font-medium">RefactoringMirror Validation</h4>
               {suggestion.validationResult && (
@@ -137,7 +137,7 @@ const RefactoringView: React.FC<Props> = ({ issue }) => {
                 </div>
               )}
             </div>
-            
+
             {suggestion.validationResult && (
               <>
                 <div className="mb-2">
@@ -146,7 +146,7 @@ const RefactoringView: React.FC<Props> = ({ issue }) => {
                     {suggestion.validationResult.confidence}%
                   </span>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div className="flex items-center">
                     {getLayerIcon(suggestion.validationResult.validationLayers.syntactic.passed)}
@@ -168,7 +168,7 @@ const RefactoringView: React.FC<Props> = ({ issue }) => {
               </>
             )}
           </div>
-          
+
           {/* Description */}
           {suggestion.description && (
             <div className="bg-blue-50 dark:bg-blue-900/20 rounded-lg p-3">
@@ -176,7 +176,7 @@ const RefactoringView: React.FC<Props> = ({ issue }) => {
               <p className="text-sm text-gray-700 dark:text-gray-300">{suggestion.description}</p>
             </div>
           )}
-          
+
           {/* Action Buttons */}
           <div className="flex gap-2 mt-4">
             <button
@@ -196,9 +196,9 @@ const RefactoringView: React.FC<Props> = ({ issue }) => {
           </div>
 
           {/* Code Diff */}
-          <ReactDiffViewer 
-            oldValue={issue.codeBlock} 
-            newValue={suggestion.suggestedCode} 
+          <ReactDiffViewer
+            oldValue={issue.codeBlock}
+            newValue={suggestion.suggestedCode}
             splitView={true}
             leftTitle="Original Code"
             rightTitle="Suggested Code"

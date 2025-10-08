@@ -29,7 +29,7 @@ const EnhancedProjectCard: React.FC<Props> = ({ project }) => {
             case 'Failed':
                 return 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300';
             default:
-                return 'bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-300';
+                return 'bg-neutral-100 text-neutral-800 dark:bg-neutral-900/30 dark:text-neutral-300';
         }
     };
 
@@ -72,15 +72,15 @@ const EnhancedProjectCard: React.FC<Props> = ({ project }) => {
     return (
         <Link
             to={`/project/${project.id}`}
-            className="block bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-lg p-6 hover:shadow-lg dark:hover:shadow-slate-900/20 transition-all duration-200 hover:border-blue-300 dark:hover:border-blue-600"
+            className="block bg-white dark:bg-neutral-800 border dark:border-neutral-700 rounded-lg p-6 hover:shadow-lg dark:hover:shadow-neutral-900/20 transition-all duration-200 hover:border-blue-300 dark:hover:border-blue-600"
         >
             {/* Header */}
             <div className="flex items-start justify-between mb-4">
                 <div className="flex-1 min-w-0">
-                    <h3 className="text-lg font-semibold text-slate-900 dark:text-slate-100 truncate">
+                    <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 truncate">
                         {project.name}
                     </h3>
-                    <p className="text-sm text-slate-600 dark:text-slate-400 truncate">
+                    <p className="text-sm text-neutral-600 dark:text-neutral-400 truncate">
                         {project.gitUrl}
                     </p>
                 </div>
@@ -90,7 +90,7 @@ const EnhancedProjectCard: React.FC<Props> = ({ project }) => {
             </div>
 
             {/* Language and Date */}
-            <div className="flex items-center gap-4 text-sm text-slate-600 dark:text-slate-400 mb-4">
+            <div className="flex items-center gap-4 text-sm text-neutral-600 dark:text-neutral-400 mb-4">
                 <span className="flex items-center">
                     <div className="w-3 h-3 rounded-full bg-blue-500 mr-2"></div>
                     {project.language}
@@ -105,12 +105,12 @@ const EnhancedProjectCard: React.FC<Props> = ({ project }) => {
                 <div className="space-y-3">
                     {/* Quality Score */}
                     <div className="flex items-center justify-between">
-                        <span className="text-sm text-slate-600 dark:text-slate-400">Code Quality</span>
+                        <span className="text-sm text-neutral-600 dark:text-neutral-400">Code Quality</span>
                         <div className="flex items-center gap-2">
                             <span className={`text-2xl font-bold ${getQualityScoreColor(issuesSummary.qualityScore)}`}>
                                 {issuesSummary.qualityScore}
                             </span>
-                            <span className="text-xs text-slate-500 dark:text-slate-400">/100</span>
+                            <span className="text-xs text-neutral-500 dark:text-neutral-400">/100</span>
                         </div>
                     </div>
 
@@ -143,8 +143,8 @@ const EnhancedProjectCard: React.FC<Props> = ({ project }) => {
                     </div>
 
                     {/* Total Issues */}
-                    <div className="text-center pt-2 border-t dark:border-slate-700">
-                        <span className="text-sm text-slate-600 dark:text-slate-400">
+                    <div className="text-center pt-2 border-t dark:border-neutral-700">
+                        <span className="text-sm text-neutral-600 dark:text-neutral-400">
                             {issuesSummary.total} total issues found
                         </span>
                     </div>
@@ -155,7 +155,7 @@ const EnhancedProjectCard: React.FC<Props> = ({ project }) => {
             {project.status === 'Analyzing' && (
                 <div className="flex items-center justify-center py-4">
                     <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div>
-                    <span className="ml-3 text-sm text-slate-600 dark:text-slate-400">
+                    <span className="ml-3 text-sm text-neutral-600 dark:text-neutral-400">
                         Analysis in progress...
                     </span>
                 </div>
