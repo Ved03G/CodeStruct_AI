@@ -58,11 +58,11 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       console.log('Checking for existing suggestions...');
       const suggestions: any = {};
       let hasAnySuggestions = false;
-      
+
       // Reset state first
       setShowExistingResults(false);
       setExistingSuggestions({});
-      
+
       for (const issue of issues) {
         try {
           console.log(`Checking suggestion for issue ${issue.id}...`);
@@ -72,7 +72,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
           console.log(`response.data.success:`, response.data.success);
           console.log(`response.data.hasSuggestion:`, response.data.hasSuggestion);
           console.log(`response.data.suggestion:`, response.data.suggestion);
-          
+
           if (response.data.success && response.data.hasSuggestion) {
             suggestions[issue.id] = response.data.suggestion;
             hasAnySuggestions = true;
@@ -89,11 +89,11 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
           });
         }
       }
-      
+
       console.log(`Total existing suggestions found: ${Object.keys(suggestions).length}, hasAnySuggestions: ${hasAnySuggestions}`);
       setExistingSuggestions(suggestions);
       setHasCheckedExisting(true);
-      
+
       if (hasAnySuggestions && Object.keys(suggestions).length > 0) {
         console.log(`✅ Setting showExistingResults to true for ${Object.keys(suggestions).length} issues`);
         setShowExistingResults(true);
@@ -127,7 +127,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       }
       return result;
     });
-    
+
     setResults(updatedResults);
     setCompleted(true);
     setActiveTab('results');
@@ -136,13 +136,13 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
   const regenerateAllSuggestions = async (forceRegenerate: boolean = false) => {
     try {
       console.log(`${forceRegenerate ? 'Force regenerating' : 'Generating missing'} suggestions...`);
-      
+
       // Reset states and show progress UI
       setProcessing(true);
       setCompleted(false);
       setShowExistingResults(false);
       setActiveTab('progress');
-      
+
       // Initialize results for progress tracking
       const initialResults = issues.map(issue => ({
         issueId: issue.id,
@@ -151,31 +151,31 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
         status: 'pending' as const
       }));
       setResults(initialResults);
-      
+
       // Call the bulk regeneration endpoint
       const response = await api.post('/issues/bulk/regenerate-all', {
         projectId: projectId,
         forceRegenerate: forceRegenerate
       });
-      
+
       if (response.data.success) {
         console.log('Regeneration completed:', response.data.summary);
-        
+
         // Mark all as completed
         setResults(prev => prev.map(r => ({
           ...r,
           success: true,
           status: 'completed' as const
         })));
-        
+
         setCompleted(true);
         setProcessing(false);
-        
+
         // Switch to results tab after completion
         setTimeout(() => {
           setActiveTab('results');
         }, 1000);
-        
+
         // Refresh existing suggestions to load the new data
         await checkExistingSuggestions();
       } else {
@@ -185,7 +185,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       console.error('Error regenerating suggestions:', error);
       setProcessing(false);
       setCompleted(false);
-      
+
       // Mark all as failed
       setResults(prev => prev.map(r => ({
         ...r,
@@ -200,17 +200,17 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       // If we have existing results, just use those
       return;
     }
-    
+
     setProcessing(true);
     setCurrentProcessing(0);
 
     for (let i = 0; i < issues.length; i++) {
       const issue = issues[i];
       setCurrentProcessing(i);
-      
+
       // Update status to processing
-      setResults(prev => prev.map(r => 
-        r.issueId === issue.id 
+      setResults(prev => prev.map(r =>
+        r.issueId === issue.id
           ? { ...r, status: 'processing' as const }
           : r
       ));
@@ -218,23 +218,23 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       try {
         // Generate AI refactoring for this issue
         const { data } = await api.post(`/issues/${issue.id}/ai-refactor`);
-        
+
         if (data.success) {
-          setResults(prev => prev.map(r => 
-            r.issueId === issue.id 
+          setResults(prev => prev.map(r =>
+            r.issueId === issue.id
               ? { ...r, status: 'completed' as const, success: true, suggestion: data.data }
               : r
           ));
         } else {
-          setResults(prev => prev.map(r => 
-            r.issueId === issue.id 
+          setResults(prev => prev.map(r =>
+            r.issueId === issue.id
               ? { ...r, status: 'failed' as const, success: false, error: data.message || 'Failed to generate refactoring' }
               : r
           ));
         }
       } catch (error: any) {
-        setResults(prev => prev.map(r => 
-          r.issueId === issue.id 
+        setResults(prev => prev.map(r =>
+          r.issueId === issue.id
             ? { ...r, status: 'failed' as const, success: false, error: error.response?.data?.message || 'Failed to generate refactoring' }
             : r
         ));
@@ -255,8 +255,8 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
   const acceptSuggestion = async (issueId: number) => {
     try {
       await api.post(`/issues/${issueId}/ai-refactor/accept`);
-      setResults(prev => prev.map(r => 
-        r.issueId === issueId 
+      setResults(prev => prev.map(r =>
+        r.issueId === issueId
           ? { ...r, accepted: true }
           : r
       ));
@@ -268,8 +268,8 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
   const rejectSuggestion = async (issueId: number) => {
     try {
       await api.post(`/issues/${issueId}/ai-refactor/reject`);
-      setResults(prev => prev.map(r => 
-        r.issueId === issueId 
+      setResults(prev => prev.map(r =>
+        r.issueId === issueId
           ? { ...r, rejected: true }
           : r
       ));
@@ -280,18 +280,18 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
 
   const acceptAllSuggestions = async () => {
     // Only accept suggestions that are successful, not already accepted, and not explicitly rejected
-    const availableForAcceptance = results.filter(r => 
-      r.success && 
-      r.suggestion && 
-      !r.accepted && 
+    const availableForAcceptance = results.filter(r =>
+      r.success &&
+      r.suggestion &&
+      !r.accepted &&
       !r.rejected
     );
-    
+
     if (availableForAcceptance.length === 0) return;
 
     try {
       setPrCreating(true);
-      
+
       // Accept all and optionally create PR
       const response = await api.post('/issues/bulk/accept-all', {
         projectId: projectId,
@@ -304,7 +304,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       }
 
       // Update local state to mark as accepted
-      setResults(prev => prev.map(r => 
+      setResults(prev => prev.map(r =>
         availableForAcceptance.find(a => a.issueId === r.issueId)
           ? { ...r, accepted: true }
           : r
@@ -329,7 +329,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       <div className="grid grid-cols-2 gap-4">
         {/* Original Code */}
         <div>
-          <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 flex items-center">
+          <div className="text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-2 flex items-center">
             <span className="w-3 h-3 bg-red-500 rounded-full mr-2"></span>
             Original Code
           </div>
@@ -339,14 +339,13 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
               return (
                 <div
                   key={i}
-                  className={`${
-                    isChanged
+                  className={`${isChanged
                       ? 'bg-red-100 dark:bg-red-900/40 border-l-2 border-red-500 pl-2'
                       : ''
-                  }`}
+                    }`}
                 >
-                  <span className="text-slate-400 mr-4 select-none">{i + 1}</span>
-                  <span className="text-slate-800 dark:text-slate-200">{line}</span>
+                  <span className="text-neutral-400 mr-4 select-none">{i + 1}</span>
+                  <span className="text-neutral-800 dark:text-neutral-200">{line}</span>
                 </div>
               );
             })}
@@ -355,7 +354,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
 
         {/* Refactored Code */}
         <div>
-          <div className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2 flex items-center">
+          <div className="text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-2 flex items-center">
             <span className="w-3 h-3 bg-green-500 rounded-full mr-2"></span>
             Refactored Code
           </div>
@@ -364,20 +363,19 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
               const change = result.suggestion.changes?.find((c: any) => c.lineNumber === i + 1);
               const isChanged = !!change;
               const isAdded = change?.type === 'add';
-              
+
               return (
                 <div
                   key={i}
-                  className={`${
-                    isAdded
+                  className={`${isAdded
                       ? 'bg-green-100 dark:bg-green-900/40 border-l-2 border-green-500 pl-2'
                       : isChanged
-                      ? 'bg-yellow-100 dark:bg-yellow-900/40 border-l-2 border-yellow-500 pl-2'
-                      : ''
-                  }`}
+                        ? 'bg-yellow-100 dark:bg-yellow-900/40 border-l-2 border-yellow-500 pl-2'
+                        : ''
+                    }`}
                 >
-                  <span className="text-slate-400 mr-4 select-none">{i + 1}</span>
-                  <span className="text-slate-800 dark:text-slate-200">{line}</span>
+                  <span className="text-neutral-400 mr-4 select-none">{i + 1}</span>
+                  <span className="text-neutral-800 dark:text-neutral-200">{line}</span>
                 </div>
               );
             })}
@@ -387,38 +385,38 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
     );
   };
 
-  const progressPercentage = processing ? 
-    ((currentProcessing || 0) / issues.length) * 100 : 
+  const progressPercentage = processing ?
+    ((currentProcessing || 0) / issues.length) * 100 :
     completed ? 100 : 0;
 
   const successfulResults = results.filter(r => r.success);
   const failedResults = results.filter(r => r.status === 'failed');
   const acceptedResults = results.filter(r => r.accepted);
   const rejectedResults = results.filter(r => r.rejected);
-  const availableForAcceptance = results.filter(r => 
-    r.success && 
-    r.suggestion && 
-    !r.accepted && 
+  const availableForAcceptance = results.filter(r =>
+    r.success &&
+    r.suggestion &&
+    !r.accepted &&
     !r.rejected
   );
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-7xl w-full max-h-[95vh] overflow-hidden flex flex-col">
+      <div className="bg-white dark:bg-neutral-800 rounded-lg shadow-xl max-w-7xl w-full max-h-[95vh] overflow-hidden flex flex-col">
         {/* Header */}
-        <div className="p-6 border-b dark:border-slate-700">
+        <div className="p-6 border-b dark:border-neutral-700">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+              <h2 className="text-2xl font-bold text-neutral-900 dark:text-neutral-100">
                 🚀 Bulk AI Refactoring
               </h2>
-              <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
+              <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">
                 Processing {issues.length} code issues with AI-powered refactoring
               </p>
             </div>
             <button
               onClick={onClose}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+              className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -429,14 +427,14 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
           {/* Progress Bar */}
           {(processing || completed) && (
             <div className="mt-4">
-              <div className="flex justify-between text-sm text-slate-600 dark:text-slate-400 mb-2">
+              <div className="flex justify-between text-sm text-neutral-600 dark:text-neutral-400 mb-2">
                 <span>
                   {processing ? `Processing issue ${(currentProcessing || 0) + 1} of ${issues.length}` : 'Completed'}
                 </span>
                 <span>{Math.round(progressPercentage)}%</span>
               </div>
-              <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2">
-                <div 
+              <div className="w-full bg-neutral-200 dark:bg-neutral-700 rounded-full h-2">
+                <div
                   className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
                   style={{ width: `${progressPercentage}%` }}
                 ></div>
@@ -448,21 +446,19 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
           <div className="flex mt-4 space-x-1">
             <button
               onClick={() => setActiveTab('progress')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                activeTab === 'progress'
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === 'progress'
                   ? 'bg-blue-600 text-white'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
+                }`}
             >
               Progress
             </button>
             <button
               onClick={() => setActiveTab('results')}
-              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                activeTab === 'results'
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${activeTab === 'results'
                   ? 'bg-blue-600 text-white'
-                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-              }`}
+                  : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
+                }`}
             >
               Results ({successfulResults.length}/{issues.length})
             </button>
@@ -476,7 +472,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
               {!hasCheckedExisting && (
                 <div className="text-center py-12">
                   <div className="text-4xl mb-4">🔍</div>
-                  <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                  <h3 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 mb-2">
                     Checking for Existing Suggestions...
                   </h3>
                   <div className="animate-spin w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full mx-auto"></div>
@@ -486,10 +482,10 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
               {hasCheckedExisting && showExistingResults && !processing && (
                 <div className="text-center py-12">
                   <div className="text-6xl mb-4">✨</div>
-                  <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                  <h3 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 mb-2">
                     Found Existing AI Suggestions!
                   </h3>
-                  <p className="text-slate-600 dark:text-slate-400 mb-6">
+                  <p className="text-neutral-600 dark:text-neutral-400 mb-6">
                     Found {Object.keys(existingSuggestions).length} existing suggestion{Object.keys(existingSuggestions).length !== 1 ? 's' : ''}. Review them in the Results tab.
                   </p>
                   <div className="flex gap-3 justify-center">
@@ -514,9 +510,9 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                       Add Missing Only
                     </button>
                   </div>
-                  
+
                   {/* Button Explanations */}
-                  <div className="mt-4 space-y-2 text-sm text-slate-600 dark:text-slate-400">
+                  <div className="mt-4 space-y-2 text-sm text-neutral-600 dark:text-neutral-400">
                     <div className="flex items-start gap-2">
                       <span className="text-orange-600 font-medium">🔄 Regenerate All:</span>
                       <span>Replaces all existing suggestions with new ones</span>
@@ -526,7 +522,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                       <span>Keeps existing suggestions, only generates for issues without suggestions</span>
                     </div>
                   </div>
-                  
+
                   {/* PR Status Information */}
                   <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
                     <h4 className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">
@@ -545,10 +541,10 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
               {hasCheckedExisting && !showExistingResults && !processing && !completed && (
                 <div className="text-center py-12">
                   <div className="text-6xl mb-4">🤖</div>
-                  <h3 className="text-xl font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                  <h3 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 mb-2">
                     Ready to Process {issues.length} Issues
                   </h3>
-                  <p className="text-slate-600 dark:text-slate-400 mb-6">
+                  <p className="text-neutral-600 dark:text-neutral-400 mb-6">
                     Click the button below to start generating AI-powered refactoring suggestions for all selected issues
                   </p>
                   <button
@@ -569,32 +565,30 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                   {results.map((result, index) => (
                     <div
                       key={result.issueId}
-                      className={`p-4 rounded-lg border flex items-center justify-between ${
-                        result.status === 'completed' 
+                      className={`p-4 rounded-lg border flex items-center justify-between ${result.status === 'completed'
                           ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
                           : result.status === 'failed'
-                          ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
-                          : result.status === 'processing'
-                          ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
-                          : 'bg-slate-50 dark:bg-slate-900/20 border-slate-200 dark:border-slate-800'
-                      }`}
+                            ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
+                            : result.status === 'processing'
+                              ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
+                              : 'bg-neutral-50 dark:bg-neutral-900/20 border-neutral-200 dark:border-neutral-800'
+                        }`}
                     >
                       <div className="flex items-center gap-3">
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                          result.status === 'completed' 
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${result.status === 'completed'
                             ? 'bg-green-500 text-white'
                             : result.status === 'failed'
-                            ? 'bg-red-500 text-white'
-                            : result.status === 'processing'
-                            ? 'bg-blue-500 text-white animate-pulse'
-                            : 'bg-slate-300 dark:bg-slate-600 text-slate-600 dark:text-slate-400'
-                        }`}>
-                          {result.status === 'completed' ? '✓' : 
-                           result.status === 'failed' ? '✗' :
-                           result.status === 'processing' ? '⚡' : index + 1}
+                              ? 'bg-red-500 text-white'
+                              : result.status === 'processing'
+                                ? 'bg-blue-500 text-white animate-pulse'
+                                : 'bg-neutral-300 dark:bg-neutral-600 text-neutral-600 dark:text-neutral-400'
+                          }`}>
+                          {result.status === 'completed' ? '✓' :
+                            result.status === 'failed' ? '✗' :
+                              result.status === 'processing' ? '⚡' : index + 1}
                         </div>
                         <div>
-                          <div className="font-medium text-slate-900 dark:text-slate-100">
+                          <div className="font-medium text-neutral-900 dark:text-neutral-100">
                             Issue #{result.issueId} - {result.issueType}
                           </div>
                           {result.error && (
@@ -604,7 +598,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                           )}
                         </div>
                       </div>
-                      
+
                       {result.status === 'completed' && result.suggestion && (
                         <button
                           onClick={() => setSelectedResult(result)}
@@ -702,7 +696,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                 {successfulResults.map((result) => (
                   <div
                     key={result.issueId}
-                    className="border dark:border-slate-700 rounded-lg p-4"
+                    className="border dark:border-neutral-700 rounded-lg p-4"
                   >
                     <div className="flex items-center justify-between mb-4">
                       <div className="flex items-center gap-3">
@@ -710,15 +704,15 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                           ✓
                         </div>
                         <div>
-                          <h3 className="font-semibold text-slate-900 dark:text-slate-100">
+                          <h3 className="font-semibold text-neutral-900 dark:text-neutral-100">
                             Issue #{result.issueId} - {result.issueType}
                           </h3>
-                          <p className="text-sm text-slate-600 dark:text-slate-400">
+                          <p className="text-sm text-neutral-600 dark:text-neutral-400">
                             AI refactoring suggestion generated successfully
                           </p>
                         </div>
                       </div>
-                      
+
                       <div className="flex gap-2">
                         {!result.accepted && !result.rejected && (
                           <>
@@ -754,10 +748,10 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                         </button>
                       </div>
                     </div>
-                    
+
                     {/* Code Diff */}
                     {selectedResult?.issueId === result.issueId && (
-                      <div className="mt-4 border-t dark:border-slate-700 pt-4">
+                      <div className="mt-4 border-t dark:border-neutral-700 pt-4">
                         {renderDiff(result)}
                       </div>
                     )}
@@ -779,7 +773,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                       <p className="text-green-700 dark:text-green-300 mb-4">
                         Your refactored code has been pushed to your GitHub repository as <strong>PR #{prResult.number}</strong>
                       </p>
-                      
+
                       <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
                         <div className="bg-green-100 dark:bg-green-800/30 rounded p-3">
                           <div className="font-medium text-green-800 dark:text-green-200">Files Modified</div>

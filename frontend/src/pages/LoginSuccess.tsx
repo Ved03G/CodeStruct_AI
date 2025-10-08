@@ -14,7 +14,7 @@ const LoginSuccess: React.FC = () => {
 
   return (
     <div className="p-6 flex items-center justify-between">
-      <div className="dark:text-slate-100">Successfully logged in! Redirecting to dashboard...</div>
+      <div className="dark:text-neutral-100">Successfully logged in! Redirecting to dashboard...</div>
       <DarkModeToggle />
     </div>
   );

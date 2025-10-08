@@ -9,8 +9,8 @@ const DarkModeToggle: React.FC<{ className?: string }> = ({ className = '' }) =>
       title="Toggle dark mode"
       onClick={toggle}
       className={`inline-flex items-center gap-2 px-3 py-1.5 rounded border text-sm transition-colors
-        bg-white text-slate-700 border-slate-200 hover:bg-slate-50
-        dark:bg-slate-800 dark:text-slate-100 dark:border-slate-700 dark:hover:bg-slate-700 ${className}`}
+        bg-white text-neutral-700 border-neutral-200 hover:bg-neutral-50
+        dark:bg-neutral-800 dark:text-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-700 ${className}`}
     >
       <span className="w-4 h-4 inline-block">
         {theme === 'dark' ? '🌙' : '☀️'}
