@@ -19,6 +19,7 @@ const Project: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [polling, setPolling] = useState<NodeJS.Timeout | null>(null);
+  const [analysisAbortController, setAnalysisAbortController] = useState<AbortController | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [ast, setAst] = useState<{ filePath: string; language: string; format: string; ast: string } | null>(null);
   const [astLoading, setAstLoading] = useState(false);
@@ -160,6 +161,28 @@ const Project: React.FC = () => {
     await fetchDetails();
   };
 
+  // Function to stop analysis
+  const stopAnalysis = () => {
+    console.log('[Stop] Stopping analysis...');
+    
+    if (analysisAbortController) {
+      analysisAbortController.abort();
+      console.log('[Stop] Aborted analysis request');
+    }
+    
+    // Clear polling
+    if (polling) {
+      clearTimeout(polling);
+      setPolling(null);
+    }
+    
+    setLoading(false);
+    setAnalysisAbortController(null);
+    setError('Analysis stopped by user');
+    
+    console.log('[Stop] Analysis stopped successfully');
+  };
+
   useEffect(() => {
     startPolling();
 
@@ -282,8 +305,14 @@ const Project: React.FC = () => {
                 className="inline-flex items-center px-4 py-2 bg-neutral-700 dark:bg-neutral-700 hover:bg-neutral-800 dark:hover:bg-neutral-600 text-white text-sm font-semibold rounded-xl transition-colors"
                 onClick={async () => {
                   try {
+                    // Create abort controller for analysis
+                    const controller = new AbortController();
+                    setAnalysisAbortController(controller);
+
                     // Start re-analysis
-                    await api.post(`/projects/${projectId}/reanalyze`, {});
+                    await api.post(`/projects/${projectId}/reanalyze`, {}, {
+                      signal: controller.signal
+                    });
 
                     // Reset state and restart polling
                     setLoading(true);
@@ -292,8 +321,13 @@ const Project: React.FC = () => {
                     // Restart polling to track the re-analysis progress
                     await startPolling();
                   } catch (e: any) {
-                    setError(e?.message ?? 'Failed to start re-analysis');
+                    if (e.name === 'AbortError') {
+                      setError('Analysis was stopped by user');
+                    } else {
+                      setError(e?.message ?? 'Failed to start re-analysis');
+                    }
                     setLoading(false);
+                    setAnalysisAbortController(null);
                   }
                 }}
               >
@@ -308,7 +342,22 @@ const Project: React.FC = () => {
 
         {/* Analysis Progress - Only show during analysis */}
         {data?.status === 'Analyzing' ? (
-          <AnalysisProgressLoader currentStage={data?.analysisStage} />
+          <div>
+            <AnalysisProgressLoader currentStage={data?.analysisStage} />
+            
+            {/* Stop Analysis Button */}
+            <div className="mt-4 flex justify-center">
+              <button
+                onClick={stopAnalysis}
+                className="bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <rect x="6" y="6" width="12" height="12" rx="1" />
+                </svg>
+                Stop Analysis
+              </button>
+            </div>
+          </div>
         ) : (
           <>
             {/* Tab Navigation - Only show after analysis completes */}

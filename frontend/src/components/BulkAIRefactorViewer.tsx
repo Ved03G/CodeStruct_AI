@@ -15,7 +15,7 @@ interface RefactoringResult {
   success: boolean;
   suggestion?: any;
   error?: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'stopped';
   accepted?: boolean;
   rejected?: boolean;
 }
@@ -37,6 +37,8 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
   const [currentProcessing, setCurrentProcessing] = useState<number | null>(null);
   const [processing, setProcessing] = useState(false);
   const [completed, setCompleted] = useState(false);
+  const [stopped, setStopped] = useState(false);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [selectedResult, setSelectedResult] = useState<RefactoringResult | null>(null);
   const [activeTab, setActiveTab] = useState<'progress' | 'results'>('progress');
   const [createPR, setCreatePR] = useState(true);
@@ -133,16 +135,43 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
     setActiveTab('results');
   };
 
+  const stopProcess = () => {
+    console.log('[Stop] Stopping current process...');
+    
+    if (abortController) {
+      abortController.abort();
+      console.log('[Stop] Aborted current request');
+    }
+    
+    setStopped(true);
+    setProcessing(false);
+    setCurrentProcessing(null);
+    
+    // Mark pending results as stopped
+    setResults(prev => prev.map(r => 
+      r.status === 'pending' || r.status === 'processing'
+        ? { ...r, status: 'stopped' as const }
+        : r
+    ));
+    
+    console.log('[Stop] Process stopped successfully');
+  };
+
   const regenerateAllSuggestions = async (forceRegenerate: boolean = false) => {
     try {
       console.log(`${forceRegenerate ? 'Force regenerating' : 'Generating missing'} suggestions...`);
 
       // Reset states and show progress UI
+      setStopped(false);
       setProcessing(true);
       setCompleted(false);
       setShowExistingResults(false);
       setActiveTab('progress');
       setCurrentProcessing(0);
+      
+      // Create new abort controller
+      const controller = new AbortController();
+      setAbortController(controller);
 
       // Initialize results for progress tracking
       const initialResults = issues.map(issue => ({
@@ -155,6 +184,12 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
 
       // Process issues one by one (same as original AI Fix All)
       for (let i = 0; i < issues.length; i++) {
+        // Check if process was stopped
+        if (controller.signal.aborted || stopped) {
+          console.log('[Stop] Process was stopped, breaking loop');
+          break;
+        }
+
         const issue = issues[i];
         setCurrentProcessing(i);
 
@@ -169,7 +204,9 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
           // Delete existing suggestion if force regenerate
           if (forceRegenerate) {
             try {
-              await api.delete(`/issues/${issue.id}/ai-refactor`);
+              await api.delete(`/issues/${issue.id}/ai-refactor`, { 
+                signal: controller.signal 
+              });
             } catch (deleteError) {
               // Ignore delete errors - suggestion might not exist
               console.log(`No existing suggestion to delete for issue ${issue.id}`);
@@ -177,7 +214,9 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
           }
 
           // Generate new AI refactoring for this issue
-          const { data } = await api.post(`/issues/${issue.id}/ai-refactor`);
+          const { data } = await api.post(`/issues/${issue.id}/ai-refactor`, {}, {
+            signal: controller.signal
+          });
 
           if (data.success) {
             setResults(prev => prev.map(r =>
@@ -236,10 +275,21 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       return;
     }
 
+    setStopped(false);
     setProcessing(true);
     setCurrentProcessing(0);
+    
+    // Create new abort controller
+    const controller = new AbortController();
+    setAbortController(controller);
 
     for (let i = 0; i < issues.length; i++) {
+      // Check if process was stopped
+      if (controller.signal.aborted || stopped) {
+        console.log('[Stop] AI Fix All was stopped, breaking loop');
+        break;
+      }
+
       const issue = issues[i];
       setCurrentProcessing(i);
 
@@ -252,7 +302,9 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
 
       try {
         // Generate AI refactoring for this issue
-        const { data } = await api.post(`/issues/${issue.id}/ai-refactor`);
+        const { data } = await api.post(`/issues/${issue.id}/ai-refactor`, {}, {
+          signal: controller.signal
+        });
 
         if (data.success) {
           setResults(prev => prev.map(r =>
@@ -476,6 +528,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
 
   const successfulResults = results.filter(r => r.success);
   const failedResults = results.filter(r => r.status === 'failed');
+  const stoppedResults = results.filter(r => r.status === 'stopped');
   const acceptedResults = results.filter(r => r.accepted);
   const rejectedResults = results.filter(r => r.rejected);
   const availableForAcceptance = results.filter(r =>
@@ -524,6 +577,21 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                   style={{ width: `${Math.max(progressPercentage, 3)}%` }}
                 ></div>
               </div>
+              
+              {/* Stop Button - Only show when processing */}
+              {processing && (
+                <div className="mt-3 flex justify-center">
+                  <button
+                    onClick={stopProcess}
+                    className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors"
+                  >
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <rect x="6" y="6" width="12" height="12" rx="1" />
+                    </svg>
+                    Stop Process
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -654,9 +722,11 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                           ? 'bg-green-50 dark:bg-green-900/20 border-green-200 dark:border-green-800'
                           : result.status === 'failed'
                             ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800'
-                            : result.status === 'processing'
-                              ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
-                              : 'bg-neutral-50 dark:bg-neutral-900/20 border-neutral-200 dark:border-neutral-800'
+                            : result.status === 'stopped'
+                              ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800'
+                              : result.status === 'processing'
+                                ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800'
+                                : 'bg-neutral-50 dark:bg-neutral-900/20 border-neutral-200 dark:border-neutral-800'
                         }`}
                     >
                       <div className="flex items-center gap-3">
@@ -664,13 +734,16 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                             ? 'bg-green-500 text-white'
                             : result.status === 'failed'
                               ? 'bg-red-500 text-white'
-                              : result.status === 'processing'
-                                ? 'bg-blue-500 text-white animate-pulse'
-                                : 'bg-neutral-300 dark:bg-neutral-600 text-neutral-600 dark:text-neutral-400'
+                              : result.status === 'stopped'
+                                ? 'bg-orange-500 text-white'
+                                : result.status === 'processing'
+                                  ? 'bg-blue-500 text-white animate-pulse'
+                                  : 'bg-neutral-300 dark:bg-neutral-600 text-neutral-600 dark:text-neutral-400'
                           }`}>
                           {result.status === 'completed' ? '✓' :
                             result.status === 'failed' ? '✗' :
-                              result.status === 'processing' ? '⚡' : index + 1}
+                              result.status === 'stopped' ? '■' :
+                                result.status === 'processing' ? '⚡' : index + 1}
                         </div>
                         <div>
                           <div className="font-medium text-neutral-900 dark:text-neutral-100">
