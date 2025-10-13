@@ -20,6 +20,7 @@ const AIRefactorViewer: React.FC<AIRefactorViewerProps> = ({
   const [generating, setGenerating] = useState(false);
   const [suggestion, setSuggestion] = useState<any | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
   const [activeTab, setActiveTab] = useState<'diff' | 'original' | 'refactored'>('diff');
 
   // Fetch existing suggestion on mount
@@ -45,17 +46,37 @@ const AIRefactorViewer: React.FC<AIRefactorViewerProps> = ({
   const generateRefactoring = async () => {
     setGenerating(true);
     setError(null);
+    
+    const controller = new AbortController();
+    setAbortController(controller);
+    
     try {
-      const { data } = await api.post(`/issues/${issueId}/ai-refactor`);
+      const { data } = await api.post(`/issues/${issueId}/ai-refactor`, {}, {
+        signal: controller.signal
+      });
       if (data.success) {
         setSuggestion(data.data);
       } else {
         setError(data.message || 'Failed to generate refactoring');
       }
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Failed to generate refactoring suggestion');
+      if (err.name === 'AbortError') {
+        setError('Generation was stopped by user');
+      } else {
+        setError(err.response?.data?.message || 'Failed to generate refactoring suggestion');
+      }
     } finally {
       setGenerating(false);
+      setAbortController(null);
+    }
+  };
+
+  const stopGeneration = () => {
+    if (abortController) {
+      abortController.abort();
+      setGenerating(false);
+      setAbortController(null);
+      setError('Generation stopped by user');
     }
   };
 
@@ -209,9 +230,20 @@ const AIRefactorViewer: React.FC<AIRefactorViewerProps> = ({
               <h3 className="text-xl font-semibold text-neutral-900 dark:text-neutral-100 mb-2">
                 🧠 AI is Thinking...
               </h3>
-              <p className="text-neutral-600 dark:text-neutral-400">
+              <p className="text-neutral-600 dark:text-neutral-400 mb-6">
                 Analyzing your code and generating refactoring suggestions
               </p>
+              
+              {/* Stop Generation Button */}
+              <button
+                onClick={stopGeneration}
+                className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 mx-auto transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <rect x="6" y="6" width="12" height="12" rx="1" />
+                </svg>
+                Stop Generation
+              </button>
             </div>
           )}
 

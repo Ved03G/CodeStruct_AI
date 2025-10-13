@@ -99,6 +99,55 @@ export class ProjectsController {
     return { projectId: id, status: 'Analyzing' };
   }
 
+  @Get(':projectId/refactoring-progress')
+  async getRefactoringProgress(@Param('projectId') projectId: string) {
+    const id = Number(projectId);
+
+    // Get all refactoring suggestions for this project (both pending and completed)
+    const suggestions = await (this.prisma as any).refactoringSuggestion.findMany({
+      where: {
+        issue: {
+          projectId: id
+        }
+      },
+      include: {
+        issue: {
+          select: {
+            id: true,
+            issueType: true,
+            filePath: true,
+            description: true,
+            codeBlock: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    const formattedSuggestions = suggestions.map((suggestion: any) => ({
+      id: suggestion.id,
+      issueId: suggestion.issue.id,
+      issueType: suggestion.issue.issueType,
+      filePath: suggestion.issue.filePath,
+      description: suggestion.description,
+      suggestedCode: suggestion.suggestedCode,
+      originalCode: suggestion.issue.codeBlock,
+      confidence: suggestion.confidence,
+      status: suggestion.status,
+      verificationBadge: suggestion.verificationBadge || 'unknown',
+      validationLayers: suggestion.validationLayers ? JSON.parse(suggestion.validationLayers) : null,
+      createdAt: suggestion.createdAt
+    }));
+
+    return {
+      suggestions: formattedSuggestions,
+      total: formattedSuggestions.length,
+      completed: formattedSuggestions.filter((s: any) => s.status === 'pending' || s.status === 'accepted' || s.status === 'rejected').length
+    };
+  }
+
   @Get(':projectId/accepted-refactorings')
   async getAcceptedRefactorings(@Param('projectId') projectId: string) {
     const id = Number(projectId);
