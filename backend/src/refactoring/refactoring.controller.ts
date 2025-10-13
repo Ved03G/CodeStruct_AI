@@ -1,4 +1,4 @@
-import { Controller, Param, Post, Get, UseGuards, HttpException, HttpStatus, Body, Request } from '@nestjs/common';
+import { Controller, Param, Post, Get, Delete, UseGuards, HttpException, HttpStatus, Body, Request } from '@nestjs/common';
 import { RefactoringService } from './refactoring.service';
 import { AIRefactoringService } from './ai-refactoring.service';
 import { GitHubPRService } from '../github/github-pr.service';
@@ -150,6 +150,31 @@ export class RefactoringController {
         {
           success: false,
           message: error.message || 'Failed to get refactoring suggestion',
+        },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  /**
+   * Delete refactoring suggestion for an issue (for force regeneration)
+   */
+  @Delete(':id/ai-refactor')
+  async deleteRefactoringSuggestion(@Param('id') id: string) {
+    try {
+      console.log(`[Controller] Deleting refactoring suggestion for issue ${id}`);
+      await this.refactoringService.deleteRefactoringSuggestion(Number(id));
+      
+      return {
+        success: true,
+        message: 'Refactoring suggestion deleted successfully'
+      };
+    } catch (error: any) {
+      console.error(`[Controller] Error deleting suggestion for issue ${id}:`, error);
+      throw new HttpException(
+        {
+          success: false,
+          message: error.message || 'Failed to delete refactoring suggestion',
         },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );

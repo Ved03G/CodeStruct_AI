@@ -214,4 +214,14 @@ export class RefactoringService {
     const issueIds = issues.map((issue: any) => issue.id);
     return await this.bulkGenerateFixes(issueIds, projectId);
   }
+
+  async deleteRefactoringSuggestion(issueId: number) {
+    console.log(`[Refactoring] Deleting suggestion for issue ${issueId}`);
+    
+    await (this.prisma as any).refactoringSuggestion.deleteMany({
+      where: { issueId: issueId }
+    });
+
+    console.log(`[Refactoring] Deleted suggestion for issue ${issueId}`);
+  }
 }

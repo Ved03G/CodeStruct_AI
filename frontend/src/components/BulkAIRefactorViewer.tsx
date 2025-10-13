@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { api } from '../lib/api';
 import { EnhancedIssue } from '../types/analysis';
 
@@ -142,6 +142,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       setCompleted(false);
       setShowExistingResults(false);
       setActiveTab('progress');
+      setCurrentProcessing(0);
 
       // Initialize results for progress tracking
       const initialResults = issues.map(issue => ({
@@ -152,39 +153,71 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       }));
       setResults(initialResults);
 
-      // Call the bulk regeneration endpoint
-      const response = await api.post('/issues/bulk/regenerate-all', {
-        projectId: projectId,
-        forceRegenerate: forceRegenerate
-      });
+      // Process issues one by one (same as original AI Fix All)
+      for (let i = 0; i < issues.length; i++) {
+        const issue = issues[i];
+        setCurrentProcessing(i);
 
-      if (response.data.success) {
-        console.log('Regeneration completed:', response.data.summary);
+        // Update status to processing
+        setResults(prev => prev.map(r =>
+          r.issueId === issue.id
+            ? { ...r, status: 'processing' as const }
+            : r
+        ));
 
-        // Mark all as completed
-        setResults(prev => prev.map(r => ({
-          ...r,
-          success: true,
-          status: 'completed' as const
-        })));
+        try {
+          // Delete existing suggestion if force regenerate
+          if (forceRegenerate) {
+            try {
+              await api.delete(`/issues/${issue.id}/ai-refactor`);
+            } catch (deleteError) {
+              // Ignore delete errors - suggestion might not exist
+              console.log(`No existing suggestion to delete for issue ${issue.id}`);
+            }
+          }
 
-        setCompleted(true);
-        setProcessing(false);
+          // Generate new AI refactoring for this issue
+          const { data } = await api.post(`/issues/${issue.id}/ai-refactor`);
 
-        // Switch to results tab after completion
-        setTimeout(() => {
-          setActiveTab('results');
-        }, 1000);
+          if (data.success) {
+            setResults(prev => prev.map(r =>
+              r.issueId === issue.id
+                ? { ...r, status: 'completed' as const, success: true, suggestion: data.data }
+                : r
+            ));
+          } else {
+            setResults(prev => prev.map(r =>
+              r.issueId === issue.id
+                ? { ...r, status: 'failed' as const, success: false, error: data.message || 'Failed to generate refactoring' }
+                : r
+            ));
+          }
+        } catch (error: any) {
+          setResults(prev => prev.map(r =>
+            r.issueId === issue.id
+              ? { ...r, status: 'failed' as const, success: false, error: error.response?.data?.message || 'Failed to generate refactoring' }
+              : r
+          ));
+        }
 
-        // Refresh existing suggestions to load the new data
-        await checkExistingSuggestions();
-      } else {
-        throw new Error('Regeneration failed');
+        // Add delay between requests to avoid overwhelming the API
+        if (i < issues.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 1000));
+        }
       }
+
+      setCurrentProcessing(null);
+      setProcessing(false);
+      setCompleted(true);
+      setActiveTab('results');
+      
+      // Refresh existing suggestions to load the new data
+      await checkExistingSuggestions();
     } catch (error) {
       console.error('Error regenerating suggestions:', error);
       setProcessing(false);
       setCompleted(false);
+      setCurrentProcessing(null);
 
       // Mark all as failed
       setResults(prev => prev.map(r => ({
@@ -194,6 +227,8 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
       })));
     }
   };
+
+
 
   const processAllIssues = async () => {
     if (showExistingResults) {
@@ -322,8 +357,12 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
   const renderDiff = (result: RefactoringResult) => {
     if (!result.suggestion) return null;
 
-    const originalLines = result.suggestion.originalCode.split('\n');
-    const refactoredLines = result.suggestion.refactoredCode.split('\n');
+    // Handle both suggestedCode and refactoredCode for backward compatibility
+    const originalCode = result.suggestion.originalCode || '';
+    const refactoredCode = result.suggestion.refactoredCode || result.suggestion.suggestedCode || '';
+
+    const originalLines = originalCode.split('\n');
+    const refactoredLines = refactoredCode.split('\n');
 
     return (
       <div className="grid grid-cols-2 gap-4">
@@ -381,13 +420,59 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
             })}
           </pre>
         </div>
+
+        {/* Validation Badge */}
+        {result.suggestion.verificationBadge && (
+          <div className="mt-4 p-3 border rounded-lg dark:border-neutral-700">
+            <div className="text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-2">
+              RefactoringMirror Validation
+            </div>
+            <div className="flex items-center space-x-2">
+              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                result.suggestion.verificationBadge === 'verified' 
+                  ? 'bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200'
+                  : result.suggestion.verificationBadge === 'partially-verified'
+                  ? 'bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200'
+                  : 'bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200'
+              }`}>
+                {result.suggestion.verificationBadge === 'verified' && '✓ Verified'}
+                {result.suggestion.verificationBadge === 'partially-verified' && '⚠ Partially Verified'}
+                {result.suggestion.verificationBadge === 'failed' && '✗ Validation Failed'}
+                {result.suggestion.verificationBadge === 'unknown' && '? Unknown'}
+              </span>
+              {result.suggestion.confidence && (
+                <span className="text-sm text-neutral-600 dark:text-neutral-400">
+                  Confidence: {result.suggestion.confidence}%
+                </span>
+              )}
+            </div>
+            {result.suggestion.validationLayers && (
+              <div className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">
+                Validation Layers: {Object.entries(result.suggestion.validationLayers).map(([layer, passed]) => 
+                  `${layer}: ${passed ? '✓' : '✗'}`
+                ).join(', ')}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     );
   };
 
   const progressPercentage = processing ?
-    ((currentProcessing || 0) / issues.length) * 100 :
+    ((currentProcessing !== null ? currentProcessing + 1 : 0) / issues.length) * 100 :
     completed ? 100 : 0;
+
+  // Debug logging for progress
+  useEffect(() => {
+    console.log('[Progress Debug]', {
+      processing,
+      completed,
+      currentProcessing,
+      issuesLength: issues.length,
+      progressPercentage
+    });
+  }, [processing, completed, currentProcessing, progressPercentage, issues.length]);
 
   const successfulResults = results.filter(r => r.success);
   const failedResults = results.filter(r => r.status === 'failed');
@@ -433,10 +518,10 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
                 </span>
                 <span>{Math.round(progressPercentage)}%</span>
               </div>
-              <div className="w-full bg-neutral-200 dark:bg-neutral-700 rounded-full h-2">
+              <div className="w-full bg-neutral-200 dark:bg-neutral-700 rounded-full h-3 border border-neutral-300 dark:border-neutral-600">
                 <div
-                  className="bg-blue-600 h-2 rounded-full transition-all duration-300 ease-out"
-                  style={{ width: `${progressPercentage}%` }}
+                  className="bg-blue-600 h-full rounded-full transition-all duration-300 ease-out shadow-sm"
+                  style={{ width: `${Math.max(progressPercentage, 3)}%` }}
                 ></div>
               </div>
             </div>
