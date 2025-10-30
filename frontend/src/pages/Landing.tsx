@@ -169,12 +169,12 @@ const Landing: React.FC = () => {
                     <span>Sign in with GitHub</span>
                   </button>
 
-                  <Link
+                  {/* <Link
                     to="/dashboard"
                     className="px-8 py-4 bg-white dark:bg-neutral-900 border-2 border-neutral-300 dark:border-neutral-700 text-neutral-900 dark:text-neutral-100 font-semibold rounded-xl hover:border-neutral-400 dark:hover:border-neutral-600 transition-all duration-200 hover:scale-105"
                   >
                     View Demo
-                  </Link>
+                  </Link> */}
                 </>
               ) : (
                 <Link
