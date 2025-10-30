@@ -88,7 +88,7 @@ export class AuthController {
   @Post('logout')
   async logout(@Res() res: Response) {
     // Clear cookie with the same attributes used when setting it so browsers remove it reliably
-    
+
     res.clearCookie('jwt_token', {
       httpOnly: true,
       sameSite: 'none',

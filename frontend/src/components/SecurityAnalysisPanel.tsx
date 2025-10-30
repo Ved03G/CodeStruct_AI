@@ -47,9 +47,11 @@ const SecurityAnalysisPanel: React.FC<SecurityAnalysisPanelProps> = ({ projectId
       const base = import.meta.env.VITE_API_BASE_URL || '';
 
       // Fetch security summary and full project issues (project endpoint already returns all issues)
+      const fetchOptions: RequestInit = { credentials: 'include', mode: 'cors', headers: { 'Content-Type': 'application/json' } };
+
       const [summaryResponse, projectResponse] = await Promise.all([
-        fetch(`${base}/analysis/security/${projectId}`),
-        fetch(`${base}/projects/${projectId}`)
+        fetch(`${base}/analysis/security/${projectId}`, fetchOptions),
+        fetch(`${base}/projects/${projectId}`, fetchOptions)
       ]);
 
       let summaryData: SecuritySummary | null = null;
