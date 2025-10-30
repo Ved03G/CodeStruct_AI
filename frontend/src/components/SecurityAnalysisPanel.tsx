@@ -43,15 +43,19 @@ const SecurityAnalysisPanel: React.FC<SecurityAnalysisPanelProps> = ({ projectId
 
   const fetchSecurityAnalysis = async () => {
     try {
+      // Use configured API base if present (supports deployed environments)
+      const base = import.meta.env.VITE_API_BASE_URL || '';
+
       // Fetch security summary and full project issues (project endpoint already returns all issues)
       const [summaryResponse, projectResponse] = await Promise.all([
-        fetch(`/api/analysis/security/${projectId}`),
-        fetch(`/api/projects/${projectId}`)
+        fetch(`${base}/analysis/security/${projectId}`),
+        fetch(`${base}/projects/${projectId}`)
       ]);
 
+      let summaryData: SecuritySummary | null = null;
       if (summaryResponse.ok) {
         try {
-          const summaryData = await summaryResponse.json();
+          summaryData = await summaryResponse.json();
           setSummary(summaryData);
         } catch (e) {
           console.error('Failed to parse security summary', e);
@@ -62,7 +66,10 @@ const SecurityAnalysisPanel: React.FC<SecurityAnalysisPanelProps> = ({ projectId
         try {
           const projectData = await projectResponse.json();
           const rawIssues: RawIssueApiShape[] = projectData?.issues || [];
-          const SECURITY_TYPES = new Set([
+
+          // Build a dynamic set of security-related issue types. Prefer server-provided keys
+          const serverTypes = summaryData ? Object.keys(summaryData.byType || {}) : [];
+          const fallbackTypes = [
             'HardcodedCredentials',
             'HardcodedUrls',
             'HardcodedSecrets',
@@ -70,7 +77,10 @@ const SecurityAnalysisPanel: React.FC<SecurityAnalysisPanelProps> = ({ projectId
             'UnsafeLogging',
             'WeakEncryption',
             'HardcodedValues'
-          ]);
+          ];
+
+          const SECURITY_TYPES = new Set<string>([...serverTypes, ...fallbackTypes]);
+
           const secIssues: SecurityIssueDisplay[] = rawIssues
             .filter(i => SECURITY_TYPES.has(i.issueType))
             .map(i => ({
@@ -78,7 +88,20 @@ const SecurityAnalysisPanel: React.FC<SecurityAnalysisPanelProps> = ({ projectId
               confidence: i.confidence ?? 70,
               lineStart: i.lineStart ?? 1
             }));
-          setIssues(secIssues);
+
+          // If none matched but summary indicates issues, try looser matching by severity
+          if (secIssues.length === 0 && summaryData && summaryData.totalIssues > 0) {
+            const fallbackBySeverity = rawIssues
+              .filter(i => ['Critical', 'High', 'Medium', 'Low'].includes(i.severity))
+              .map(i => ({
+                ...i,
+                confidence: i.confidence ?? 70,
+                lineStart: i.lineStart ?? 1
+              }));
+            setIssues(fallbackBySeverity);
+          } else {
+            setIssues(secIssues);
+          }
         } catch (e) {
           console.error('Failed to parse project issues', e);
         }
@@ -184,8 +207,8 @@ const SecurityAnalysisPanel: React.FC<SecurityAnalysisPanelProps> = ({ projectId
           <button
             onClick={() => setSelectedType('all')}
             className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${selectedType === 'all'
-                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+              ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+              : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
               }`}
           >
             All Issues
@@ -195,8 +218,8 @@ const SecurityAnalysisPanel: React.FC<SecurityAnalysisPanelProps> = ({ projectId
               key={type}
               onClick={() => setSelectedType(type)}
               className={`px-3 py-1 rounded-full text-sm font-medium transition-colors flex items-center gap-1 ${selectedType === type
-                  ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
-                  : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
+                ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300'
+                : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 hover:bg-neutral-200 dark:hover:bg-neutral-700'
                 }`}
             >
               {getSecurityIcon(type)}
