@@ -13,9 +13,9 @@ const DarkModeToggle: React.FC<{ className?: string }> = ({ className = '' }) =>
         dark:bg-neutral-800 dark:text-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-700 ${className}`}
     >
       <span className="w-4 h-4 inline-block">
-        {theme === 'dark' ? '🌙' : '☀️'}
+        {theme === 'dark' ? '☀️' : '🌙'}
       </span>
-      <span className="hidden sm:inline">{theme === 'dark' ? 'Dark' : 'Light'}</span>
+      <span className="hidden sm:inline">{theme === 'dark' ? 'Light' : 'Dark'}</span>
     </button>
   );
 };

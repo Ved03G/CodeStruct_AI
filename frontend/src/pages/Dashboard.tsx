@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import AnalysisProgressLoader from '../components/AnalysisProgressLoader';
+import DarkModeToggle from '../components/DarkModeToggle';
 
 const Dashboard: React.FC = () => {
   const [projects, setProjects] = useState<any[]>([]);
@@ -162,6 +163,8 @@ const Dashboard: React.FC = () => {
                   <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">{user.username || user.email}</span>
                 </div>
               )}
+
+              <DarkModeToggle />
 
               <button
                 onClick={handleShowImportModal}
