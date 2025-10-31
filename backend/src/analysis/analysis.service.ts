@@ -156,6 +156,13 @@ export class AnalysisService {
     try {
       // Stage 1: Cloning
       await this.updateAnalysisStage(projectId, 'cloning');
+      
+      // Check if analysis should stop
+      if (await this.shouldStopAnalysis(projectId)) {
+        this.dlog('Analysis stopped during cloning stage');
+        return;
+      }
+      
       dir = await mkdtemp(join(tmpdir(), 'codestruct-'));
       const git = simpleGit();
       await git.clone(gitUrl, dir);
@@ -163,6 +170,13 @@ export class AnalysisService {
 
       // Stage 2: Language Detection
       await this.updateAnalysisStage(projectId, 'detecting');
+      
+      // Check if analysis should stop
+      if (await this.shouldStopAnalysis(projectId)) {
+        this.dlog('Analysis stopped during detection stage');
+        return;
+      }
+      
       // Auto-detect language if needed
       let detectedLanguage = language;
       if (language === 'auto-detect') {
@@ -186,8 +200,16 @@ export class AnalysisService {
 
       const files = await this.collectFiles(dir);
       this.dlog('files collected', { count: files.length });
+      
       // Stage 3: Parsing Files
       await this.updateAnalysisStage(projectId, 'parsing');
+      
+      // Check if analysis should stop
+      if (await this.shouldStopAnalysis(projectId)) {
+        this.dlog('Analysis stopped during parsing stage');
+        return;
+      }
+      
       // Parse all files and persist ASTs using ParserService
       let asts: any = {};
       try {
@@ -228,6 +250,13 @@ export class AnalysisService {
 
       // Stage 4: Analyzing Code Smells
       await this.updateAnalysisStage(projectId, 'analyzing');
+      
+      // Check if analysis should stop
+      if (await this.shouldStopAnalysis(projectId)) {
+        this.dlog('Analysis stopped during analyzing stage');
+        return;
+      }
+      
       // Enhanced analysis using new services
       const codeBlocks: Array<{ code: string; filePath: string; startIndex: number; endIndex: number; ast?: any }> = [];
       let created = 0;
@@ -382,6 +411,13 @@ export class AnalysisService {
 
       // Stage 5: Duplicate Detection
       await this.updateAnalysisStage(projectId, 'duplicates');
+      
+      // Check if analysis should stop
+      if (await this.shouldStopAnalysis(projectId)) {
+        this.dlog('Analysis stopped during duplicate detection stage');
+        return;
+      }
+      
       // Enhanced duplicate detection with memory optimization
       this.dlog('starting enhanced duplicate detection', { codeBlockCount: codeBlocks.length });
 
@@ -1215,6 +1251,27 @@ export class AnalysisService {
       this.dlog(`[Stage] Updated to: ${stage}`, { projectId });
     } catch (error) {
       this.dlog(`[Stage] Failed to update stage:`, error);
+    }
+  }
+
+  /**
+   * Check if analysis should be stopped
+   */
+  private async shouldStopAnalysis(projectId: number): Promise<boolean> {
+    try {
+      const project = await (this.prisma as any).project.findUnique({
+        where: { id: projectId },
+        select: { status: true, analysisStage: true }
+      });
+      
+      if (project && (project.status === 'Stopped' || project.analysisStage === 'stopped')) {
+        this.dlog(`[Stop] Analysis stop detected for project ${projectId}`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      this.dlog(`[Stop] Error checking stop status:`, error);
+      return false;
     }
   }
 }

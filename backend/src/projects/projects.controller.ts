@@ -88,6 +88,24 @@ export class ProjectsController {
     return { ok: true };
   }
 
+  @Post(':projectId/stop-analysis')
+  async stopAnalysis(@Param('projectId') projectId: string) {
+    const id = Number(projectId);
+    const project = await (this.prisma as any).project.findUnique({ where: { id } });
+    if (!project) return { error: 'Not found' };
+    
+    // Update project status to indicate analysis should stop
+    await (this.prisma as any).project.update({ 
+      where: { id }, 
+      data: { 
+        status: 'Stopped', 
+        analysisStage: 'stopped' 
+      } 
+    });
+    
+    return { ok: true, message: 'Analysis stop requested' };
+  }
+
   @Post(':projectId/analyze')
   @HttpCode(HttpStatus.ACCEPTED)
   async analyzeAlias(@Param('projectId') projectId: string, @Body() body: { language?: string }) {

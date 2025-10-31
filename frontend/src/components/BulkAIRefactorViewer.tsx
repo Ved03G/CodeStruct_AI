@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { api } from '../lib/api';
 import { EnhancedIssue } from '../types/analysis';
 
@@ -39,6 +39,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
   const [completed, setCompleted] = useState(false);
   const [stopped, setStopped] = useState(false);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const stoppedRef = useRef(false); // Use ref for immediate stop check
   const [selectedResult, setSelectedResult] = useState<RefactoringResult | null>(null);
   const [activeTab, setActiveTab] = useState<'progress' | 'results'>('progress');
   const [createPR, setCreatePR] = useState(true);
@@ -138,6 +139,9 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
   const stopProcess = () => {
     console.log('[Stop] Stopping current process...');
     
+    // Set ref immediately for synchronous check in loops
+    stoppedRef.current = true;
+    
     if (abortController) {
       abortController.abort();
       console.log('[Stop] Aborted current request');
@@ -163,6 +167,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
 
       // Reset states and show progress UI
       setStopped(false);
+      stoppedRef.current = false; // Reset ref
       setProcessing(true);
       setCompleted(false);
       setShowExistingResults(false);
@@ -184,8 +189,8 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
 
       // Process issues one by one (same as original AI Fix All)
       for (let i = 0; i < issues.length; i++) {
-        // Check if process was stopped
-        if (controller.signal.aborted || stopped) {
+        // Check if process was stopped (use ref for immediate check)
+        if (controller.signal.aborted || stoppedRef.current) {
           console.log('[Stop] Process was stopped, breaking loop');
           break;
         }
@@ -232,11 +237,20 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
             ));
           }
         } catch (error: any) {
-          setResults(prev => prev.map(r =>
-            r.issueId === issue.id
-              ? { ...r, status: 'failed' as const, success: false, error: error.response?.data?.message || 'Failed to generate refactoring' }
-              : r
-          ));
+          // Check if the error is due to abort/stop
+          if (error.name === 'CanceledError' || error.message?.includes('abort') || stoppedRef.current) {
+            setResults(prev => prev.map(r =>
+              r.issueId === issue.id
+                ? { ...r, status: 'stopped' as const, success: false }
+                : r
+            ));
+          } else {
+            setResults(prev => prev.map(r =>
+              r.issueId === issue.id
+                ? { ...r, status: 'failed' as const, success: false, error: error.response?.data?.message || 'Failed to generate refactoring' }
+                : r
+            ));
+          }
         }
 
         // Add delay between requests to avoid overwhelming the API
@@ -276,6 +290,7 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
     }
 
     setStopped(false);
+    stoppedRef.current = false; // Reset ref
     setProcessing(true);
     setCurrentProcessing(0);
     
@@ -284,8 +299,8 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
     setAbortController(controller);
 
     for (let i = 0; i < issues.length; i++) {
-      // Check if process was stopped
-      if (controller.signal.aborted || stopped) {
+      // Check if process was stopped (use ref for immediate check)
+      if (controller.signal.aborted || stoppedRef.current) {
         console.log('[Stop] AI Fix All was stopped, breaking loop');
         break;
       }
@@ -320,11 +335,20 @@ const BulkAIRefactorViewer: React.FC<BulkAIRefactorViewerProps> = ({
           ));
         }
       } catch (error: any) {
-        setResults(prev => prev.map(r =>
-          r.issueId === issue.id
-            ? { ...r, status: 'failed' as const, success: false, error: error.response?.data?.message || 'Failed to generate refactoring' }
-            : r
-        ));
+        // Check if the error is due to abort/stop
+        if (error.name === 'CanceledError' || error.message?.includes('abort') || stoppedRef.current) {
+          setResults(prev => prev.map(r =>
+            r.issueId === issue.id
+              ? { ...r, status: 'stopped' as const, success: false }
+              : r
+          ));
+        } else {
+          setResults(prev => prev.map(r =>
+            r.issueId === issue.id
+              ? { ...r, status: 'failed' as const, success: false, error: error.response?.data?.message || 'Failed to generate refactoring' }
+              : r
+          ));
+        }
       }
 
       // Add delay between requests to avoid overwhelming the API

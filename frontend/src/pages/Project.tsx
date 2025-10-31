@@ -18,6 +18,7 @@ const Project: React.FC = () => {
   const [data, setData] = useState<ProjectData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notification, setNotification] = useState<{ message: string; type: 'info' | 'success' | 'warning' } | null>(null);
   const [polling, setPolling] = useState<NodeJS.Timeout | null>(null);
   const [analysisAbortController, setAnalysisAbortController] = useState<AbortController | null>(null);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
@@ -162,8 +163,16 @@ const Project: React.FC = () => {
   };
 
   // Function to stop analysis
-  const stopAnalysis = () => {
+  const stopAnalysis = async () => {
     console.log('[Stop] Stopping analysis...');
+    
+    try {
+      // Call backend to stop analysis
+      await api.post(`/projects/${projectId}/stop-analysis`);
+      console.log('[Stop] Backend notified to stop analysis');
+    } catch (err) {
+      console.error('[Stop] Error stopping analysis:', err);
+    }
     
     if (analysisAbortController) {
       analysisAbortController.abort();
@@ -178,7 +187,15 @@ const Project: React.FC = () => {
     
     setLoading(false);
     setAnalysisAbortController(null);
-    setError('Analysis stopped by user');
+    
+    // Show notification instead of error
+    setNotification({
+      message: 'Analysis stopped by user',
+      type: 'info'
+    });
+    
+    // Auto-hide notification after 5 seconds
+    setTimeout(() => setNotification(null), 5000);
     
     console.log('[Stop] Analysis stopped successfully');
   };
@@ -259,6 +276,50 @@ const Project: React.FC = () => {
   return (
     <div className="min-h-screen bg-neutral-50 dark:bg-neutral-950">
       <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Notification Toast */}
+        {notification && (
+          <div className="fixed top-4 right-4 z-50 max-w-md animate-in slide-in-from-top-5 fade-in">
+            <div className={`
+              bg-white dark:bg-neutral-900 
+              border-2 rounded-xl p-4 shadow-lg
+              ${notification.type === 'info' ? 'border-blue-500 dark:border-blue-600' : ''}
+              ${notification.type === 'success' ? 'border-green-500 dark:border-green-600' : ''}
+              ${notification.type === 'warning' ? 'border-orange-500 dark:border-orange-600' : ''}
+            `}>
+              <div className="flex items-start space-x-3">
+                {notification.type === 'info' && (
+                  <svg className="w-6 h-6 text-blue-600 dark:text-blue-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                  </svg>
+                )}
+                {notification.type === 'success' && (
+                  <svg className="w-6 h-6 text-green-600 dark:text-green-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                  </svg>
+                )}
+                {notification.type === 'warning' && (
+                  <svg className="w-6 h-6 text-orange-600 dark:text-orange-400 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                  </svg>
+                )}
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                    {notification.message}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setNotification(null)}
+                  className="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+                >
+                  <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        
         {/* Header */}
         <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-2xl p-6 mb-6 shadow-sm">
           <div className="flex items-start justify-between">
@@ -321,8 +382,13 @@ const Project: React.FC = () => {
                     // Restart polling to track the re-analysis progress
                     await startPolling();
                   } catch (e: any) {
-                    if (e.name === 'AbortError') {
-                      setError('Analysis was stopped by user');
+                    if (e.name === 'AbortError' || e.name === 'CanceledError') {
+                      // Show notification for stopped analysis
+                      setNotification({
+                        message: 'Re-analysis stopped by user',
+                        type: 'info'
+                      });
+                      setTimeout(() => setNotification(null), 5000);
                     } else {
                       setError(e?.message ?? 'Failed to start re-analysis');
                     }
