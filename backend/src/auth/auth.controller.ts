@@ -76,7 +76,9 @@ export class AuthController {
         user: {
           id: user.id,
           username: user.githubUsername,
-          email: user.email
+          email: user.email,
+          displayName: user.displayName,
+          bio: user.bio,
         },
       };
     } catch (error) {

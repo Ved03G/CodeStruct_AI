@@ -152,6 +152,23 @@ export class AnalysisService {
 
   private async analyzeRepo(gitUrl: string, language: string, projectId: number, userId?: number) {
     this.dlog('analyzeRepo start', { gitUrl, language, projectId, userId });
+    
+    // Fetch user settings to get complexity threshold
+    const originalThreshold = this.complexityThreshold;
+    if (userId) {
+      try {
+        const settings = await (this.prisma as any).userSettings.findUnique({
+          where: { userId: userId }
+        });
+        if (settings && settings.complexityThreshold) {
+          this.complexityThreshold = settings.complexityThreshold;
+          this.dlog('Using user complexity threshold', { threshold: this.complexityThreshold });
+        }
+      } catch (err) {
+        this.dlog('Failed to fetch user settings, using default threshold', err);
+      }
+    }
+    
     let dir: string | undefined;
     try {
       // Stage 1: Cloning
@@ -503,6 +520,9 @@ export class AnalysisService {
       } catch { }
       throw e;
     } finally {
+      // Restore original threshold
+      this.complexityThreshold = originalThreshold;
+      
       // Cleanup temp dir best-effort
       if (dir) {
         try {

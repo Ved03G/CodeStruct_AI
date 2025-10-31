@@ -1,21 +1,55 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../lib/api';
 import DarkModeToggle from '../components/DarkModeToggle';
 
 const Settings: React.FC = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const [activeSection, setActiveSection] = useState<'general' | 'notifications' | 'advanced'>('general');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
   // Settings state
   const [autoAnalysis, setAutoAnalysis] = useState(true);
   const [showComplexityWarnings, setShowComplexityWarnings] = useState(true);
   const [complexityThreshold, setComplexityThreshold] = useState(3);
 
-  const handleSaveSettings = () => {
-    // TODO: Save settings to backend
-    alert('Settings saved successfully!');
+  // Load settings on mount
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+    try {
+      const { data } = await api.get('/user/settings');
+      setAutoAnalysis(data.autoAnalysis ?? true);
+      setShowComplexityWarnings(data.showComplexityWarnings ?? true);
+      setComplexityThreshold(data.complexityThreshold ?? 3);
+    } catch (err) {
+      console.error('Failed to load settings:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveSettings = async () => {
+    setSaving(true);
+    try {
+      await api.put('/user/settings', {
+        autoAnalysis,
+        showComplexityWarnings,
+        complexityThreshold
+      });
+      
+      // Show success notification
+      alert('Settings saved successfully!');
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Failed to save settings');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -280,9 +314,13 @@ const Settings: React.FC = () => {
               <div className="mt-6 pt-6 border-t border-neutral-200 dark:border-neutral-800 flex justify-end">
                 <button
                   onClick={handleSaveSettings}
-                  className="px-6 py-2 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition-colors"
+                  disabled={saving}
+                  className="px-6 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-400 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors flex items-center space-x-2"
                 >
-                  Save Changes
+                  {saving && (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  )}
+                  <span>{saving ? 'Saving...' : 'Save Changes'}</span>
                 </button>
               </div>
             </div>

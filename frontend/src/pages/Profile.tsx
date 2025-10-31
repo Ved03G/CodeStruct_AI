@@ -1,30 +1,73 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { api } from '../lib/api';
 import DarkModeToggle from '../components/DarkModeToggle';
 
 const Profile: React.FC = () => {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
   
   // Profile state
   const [isEditing, setIsEditing] = useState(false);
-  const [displayName, setDisplayName] = useState(user?.username || '');
-  const [email, setEmail] = useState(user?.email || '');
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [displayName, setDisplayName] = useState('');
+  const [email, setEmail] = useState('');
   const [bio, setBio] = useState('');
+  
+  // Statistics
+  const [statistics, setStatistics] = useState({
+    projects: 0,
+    issues: 0,
+    refactorings: 0
+  });
 
-  const handleSaveProfile = () => {
-    // TODO: Save profile to backend
-    setIsEditing(false);
-    alert('Profile updated successfully!');
+  useEffect(() => {
+    loadProfile();
+  }, []);
+
+  const loadProfile = async () => {
+    try {
+      const { data } = await api.get('/user/profile');
+      setDisplayName(data.displayName || data.githubUsername || '');
+      setEmail(data.email || '');
+      setBio(data.bio || '');
+      setStatistics(data.statistics || { projects: 0, issues: 0, refactorings: 0 });
+    } catch (err) {
+      console.error('Failed to load profile:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleDeleteAccount = () => {
+  const handleSaveProfile = async () => {
+    setSaving(true);
+    try {
+      await api.put('/user/profile', {
+        bio
+      });
+      
+      await refreshUser();
+      setIsEditing(false);
+      alert('Bio updated successfully!');
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Failed to update bio');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
     if (window.confirm('Are you sure you want to delete your account? This action cannot be undone.')) {
-      // TODO: Delete account via backend
-      alert('Account deletion requested');
-      logout();
-      navigate('/');
+      try {
+        await api.delete('/user/account');
+        alert('Account deleted successfully');
+        logout();
+        navigate('/');
+      } catch (err: any) {
+        alert(err.response?.data?.message || 'Failed to delete account');
+      }
     }
   };
 
@@ -102,7 +145,7 @@ const Profile: React.FC = () => {
                   onClick={() => setIsEditing(!isEditing)}
                   className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition-colors"
                 >
-                  {isEditing ? 'Cancel' : 'Edit Profile'}
+                  {isEditing ? 'Cancel' : 'Edit Bio'}
                 </button>
               </div>
 
@@ -122,7 +165,7 @@ const Profile: React.FC = () => {
             
             {isEditing ? (
               <div className="space-y-4">
-                {/* Display Name */}
+                {/* Display Name - Read Only */}
                 <div>
                   <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
                     Display Name
@@ -130,13 +173,14 @@ const Profile: React.FC = () => {
                   <input
                     type="text"
                     value={displayName}
-                    onChange={(e) => setDisplayName(e.target.value)}
-                    className="w-full px-4 py-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg text-neutral-900 dark:text-neutral-100 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    placeholder="Enter your display name"
+                    readOnly
+                    disabled
+                    className="w-full px-4 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg text-neutral-500 dark:text-neutral-400 cursor-not-allowed"
                   />
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Display name cannot be changed</p>
                 </div>
 
-                {/* Email */}
+                {/* Email - Read Only */}
                 <div>
                   <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
                     Email
@@ -144,13 +188,14 @@ const Profile: React.FC = () => {
                   <input
                     type="email"
                     value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    className="w-full px-4 py-2 bg-white dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg text-neutral-900 dark:text-neutral-100 focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                    placeholder="Enter your email"
+                    readOnly
+                    disabled
+                    className="w-full px-4 py-2 bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-lg text-neutral-500 dark:text-neutral-400 cursor-not-allowed"
                   />
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-1">Email is from your GitHub account</p>
                 </div>
 
-                {/* Bio */}
+                {/* Bio - Editable */}
                 <div>
                   <label className="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-2">
                     Bio
@@ -173,9 +218,13 @@ const Profile: React.FC = () => {
                   </button>
                   <button
                     onClick={handleSaveProfile}
-                    className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white font-medium rounded-lg transition-colors"
+                    disabled={saving}
+                    className="px-4 py-2 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-400 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors flex items-center space-x-2"
                   >
-                    Save Changes
+                    {saving && (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    )}
+                    <span>{saving ? 'Saving...' : 'Save Bio'}</span>
                   </button>
                 </div>
               </div>
@@ -210,15 +259,15 @@ const Profile: React.FC = () => {
             <h3 className="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-4">Statistics</h3>
             <div className="grid grid-cols-3 gap-4">
               <div className="text-center p-4 bg-neutral-50 dark:bg-neutral-800 rounded-lg">
-                <div className="text-3xl font-bold text-primary-600">0</div>
+                <div className="text-3xl font-bold text-primary-600">{statistics.projects}</div>
                 <div className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">Projects</div>
               </div>
               <div className="text-center p-4 bg-neutral-50 dark:bg-neutral-800 rounded-lg">
-                <div className="text-3xl font-bold text-primary-600">0</div>
+                <div className="text-3xl font-bold text-primary-600">{statistics.issues}</div>
                 <div className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">Issues Found</div>
               </div>
               <div className="text-center p-4 bg-neutral-50 dark:bg-neutral-800 rounded-lg">
-                <div className="text-3xl font-bold text-primary-600">0</div>
+                <div className="text-3xl font-bold text-primary-600">{statistics.refactorings}</div>
                 <div className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">Refactorings</div>
               </div>
             </div>

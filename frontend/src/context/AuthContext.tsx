@@ -1,13 +1,20 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 
-type User = { id: number; username?: string; email?: string } | null;
+type User = { 
+  id: number; 
+  username?: string; 
+  email?: string;
+  displayName?: string;
+  bio?: string;
+} | null;
 
 type AuthCtx = {
   user: User;
   isAuthenticated: boolean;
   login: () => Promise<void>;
   logout: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 };
 
 const Ctx = createContext<AuthCtx | undefined>(undefined);
@@ -21,14 +28,18 @@ export const useAuth = () => {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User>(null);
 
+  const refreshUser = async () => {
+    try {
+      const { data } = await api.get('/auth/me');
+      if (data?.authenticated) setUser(data.user);
+    } catch (error) {
+      console.error('Failed to refresh user:', error);
+    }
+  };
+
   useEffect(() => {
     // On mount, try session cookie me endpoint
-    (async () => {
-      try {
-        const { data } = await api.get('/auth/me');
-        if (data?.authenticated) setUser(data.user);
-      } catch { }
-    })();
+    refreshUser();
   }, []);
 
   const login = async () => {
@@ -54,7 +65,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const value = useMemo(
-    () => ({ user, isAuthenticated: !!user, login, logout }),
+    () => ({ user, isAuthenticated: !!user, login, logout, refreshUser }),
     [user]
   );
 
